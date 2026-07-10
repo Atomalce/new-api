@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Fork Maintenance Guide](./fork-maintenance.md) | Fork 分支模型、上游合并冲突处理、部署链路 | 合并 upstream/main 前必读;部署与 CI 变更时 |
 
 ---
 
