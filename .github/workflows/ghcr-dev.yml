@@ -36,8 +36,16 @@ jobs:
           context: .
           platforms: linux/amd64
           push: true
+          provenance: false
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:dev-${{ env.SHORT_SHA }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Prune old image versions (keep 10)
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: new-api
+          package-type: container
+          min-versions-to-keep: 10
