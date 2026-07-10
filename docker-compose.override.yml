@@ -1,0 +1,5 @@
+# Fork 覆盖:使用自有 GHCR 镜像(dev 分支自动构建)。
+# docker compose 会自动合并本文件与 docker-compose.yml,无需 -f 参数。
+services:
+  new-api:
+    image: ghcr.io/atomalce/new-api:latest

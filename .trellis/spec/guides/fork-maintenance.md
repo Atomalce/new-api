@@ -55,7 +55,8 @@ git checkout dev  && git merge main    # 冲突只在这一步解决
 
 链路:**push dev → GitHub Actions 构建镜像 → ghcr.io/atomalce/new-api → 云服务器 pull**。
 
-- 服务器用仓库 `docker-compose.yml`,image 从 `calciumion/new-api:latest` 改为 GHCR 自有镜像。
+- 仓库已提交 `docker-compose.override.yml`(fork 自有文件,永不与上游冲突),自动把 image 覆盖为 GHCR 自有镜像,`docker compose` 原生命令即可;`docker-compose.yml` 本身保持上游原样。
+- ⚠️ 上游 compose 内置默认密码 `123456`(postgres/redis,仅容器内网可达);正式生产建议改掉。
 - 生产必须设 `SQL_DSN`(PG/MySQL,compose 模板已含 postgres);SQLite 仅限本地开发。多实例部署才需要 `SESSION_SECRET`。
 - 服务器更新:`docker compose pull && docker compose up -d`。
 
