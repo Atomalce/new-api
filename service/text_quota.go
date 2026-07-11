@@ -222,7 +222,11 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		summary.PromptTokens -= summary.CacheTokens
 		isUsingCustomSettings := relayInfo.PriceData.UsePrice || hasCustomModelRatio(summary.ModelName, relayInfo.PriceData.ModelRatio)
 		if summary.CacheCreationTokens == 0 && relayInfo.PriceData.CacheCreationRatio != 1 && usage.Cost != 0 && !isUsingCustomSettings {
-			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*usage, relayInfo.PriceData)
+			cacheInferenceUsage := usage
+			if relayInfo.PromptCacheExpiry != nil && relayInfo.PromptCacheExpiry.OriginalUsage != nil {
+				cacheInferenceUsage = relayInfo.PromptCacheExpiry.OriginalUsage
+			}
+			maybeCacheCreationTokens := CalcOpenRouterCacheCreateTokens(*cacheInferenceUsage, relayInfo.PriceData)
 			if maybeCacheCreationTokens >= 0 && summary.PromptTokens >= maybeCacheCreationTokens {
 				summary.CacheCreationTokens = maybeCacheCreationTokens
 			}
@@ -351,7 +355,13 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 		extraContent = append(extraContent, "上游无计费信息")
 	}
 	if originUsage != nil {
-		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, billingUsage, relayInfo.GetFinalRequestRelayFormat())
+		observedUsage := billingUsage
+		if relayInfo.PromptCacheExpiry != nil && relayInfo.PromptCacheExpiry.OriginalUsage != nil {
+			// cache telemetry observes the raw upstream values, not the
+			// discount-expiry-adjusted ones
+			observedUsage = effectiveBillingUsage(relayInfo.PromptCacheExpiry.OriginalUsage)
+		}
+		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, observedUsage, relayInfo.GetFinalRequestRelayFormat())
 	}
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
@@ -487,6 +497,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	}
 
 	attachQuotaSaturation(ctx, relayInfo, other)
+	attachPromptCacheExpiryAudit(relayInfo, other)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,

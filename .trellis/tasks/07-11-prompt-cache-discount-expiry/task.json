@@ -1,0 +1,33 @@
+{
+  "id": "prompt-cache-discount-expiry",
+  "name": "prompt-cache-discount-expiry",
+  "title": "Codex Responses prompt cache discount expiry billing",
+  "description": "Gateway-side fixed 180s cache-read discount expiry for Codex /v1/responses traffic: the cycle owner's cached tokens are rebilled as full-price input, with billing, consume logs, and client-visible usage adjusted from one decision.",
+  "status": "in_progress",
+  "dev_type": "backend",
+  "scope": "backend",
+  "package": null,
+  "priority": "P2",
+  "creator": "yls",
+  "assignee": "yls",
+  "createdAt": "2026-07-11",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "relay/common/relay_info.go",
+    "relay/channel/openai/relay_responses.go",
+    "relay/channel/openai/responses_via_chat.go",
+    "relay/channel/gemini/relay_responses.go",
+    "service/text_quota.go",
+    "service/tiered_settle.go"
+  ],
+  "notes": "2026-07-10 merged earlier planning iteration 07-11-upstream-usage-cache-expiry-billing into this task; its archived artifacts remain research-only and current prd.md/design.md win conflicts. 2026-07-11 realigned to positively identified Codex /v1/responses traffic and a fixed 180s cycle. User selected prompt_cache_key with Session_id fallback as the same-request cache-lineage identity, always-on activation with no feature flag, and no-Redis compatibility no-op startup. Implementation and acceptance verification completed with containerized Go 1.25.1; full tests/build/race pass, while full vet retains documented pre-existing warnings.",
+  "meta": {}
+}

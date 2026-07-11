@@ -12,6 +12,7 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/relayconvert"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -40,22 +41,19 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		c.Set("image_generation_call_size", responsesResponse.GetSize())
 	}
 
+	// compute usage before flushing the body so the prompt-cache expiry
+	// policy can adjust both the bill and the client-visible bytes from one
+	// decision
+	usage := relayconvert.UsageFromResponsesUsage(responsesResponse.Usage)
+	claimEligible := responsesResponse.Usage != nil && service.ResponsesStatusCompleted(responsesResponse.Status)
+	if service.ApplyPromptCacheDiscountExpiry(c, info, usage, claimEligible) && responsesResponse.Usage != nil {
+		responseBody = service.PatchResponsesUsageCachedTokens(responseBody, "usage")
+	}
+
 	// 写入新的 response body
 	service.IOCopyBytesGracefully(c, resp, responseBody)
-
-	// compute usage
-	usage := dto.Usage{}
-	if responsesResponse.Usage != nil {
-		usage.PromptTokens = responsesResponse.Usage.InputTokens
-		usage.CompletionTokens = responsesResponse.Usage.OutputTokens
-		usage.TotalTokens = responsesResponse.Usage.TotalTokens
-		if responsesResponse.Usage.InputTokensDetails != nil {
-			usage.PromptTokensDetails.CachedTokens = responsesResponse.Usage.InputTokensDetails.CachedTokens
-			usage.PromptTokensDetails.CacheWriteTokens = responsesResponse.Usage.InputTokensDetails.CacheWriteTokens
-		}
-	}
 	if info == nil || info.ResponsesUsageInfo == nil || info.ResponsesUsageInfo.BuiltInTools == nil {
-		return &usage, nil
+		return usage, nil
 	}
 	// 解析 Tools 用量
 	for _, tool := range responsesResponse.Tools {
@@ -66,7 +64,7 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 		}
 		buildToolinfo.CallCount++
 	}
-	return &usage, nil
+	return usage, nil
 }
 
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -89,26 +87,20 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			sr.Error(err)
 			return
 		}
+		if streamResponse.Response != nil && streamResponse.Response.Usage != nil {
+			claimEligible := service.ResponsesTerminalAllowsClaim(streamResponse.Type, streamResponse.Response.Status)
+			if service.ApplyPromptCacheDiscountExpiry(c, info, streamResponse.Response.Usage, claimEligible) {
+				data = service.PatchResponsesStreamUsageCachedTokens(data)
+			}
+		}
 		sendResponsesStreamData(c, streamResponse, data)
 		switch streamResponse.Type {
-		case "response.completed":
+		case "response.completed", "response.done", "response.incomplete", "response.failed":
 			if streamResponse.Response != nil {
 				if streamResponse.Response.Usage != nil {
-					if streamResponse.Response.Usage.InputTokens != 0 {
-						usage.PromptTokens = streamResponse.Response.Usage.InputTokens
-					}
-					if streamResponse.Response.Usage.OutputTokens != 0 {
-						usage.CompletionTokens = streamResponse.Response.Usage.OutputTokens
-					}
-					if streamResponse.Response.Usage.TotalTokens != 0 {
-						usage.TotalTokens = streamResponse.Response.Usage.TotalTokens
-					}
-					if streamResponse.Response.Usage.InputTokensDetails != nil {
-						usage.PromptTokensDetails.CachedTokens = streamResponse.Response.Usage.InputTokensDetails.CachedTokens
-						usage.PromptTokensDetails.CacheWriteTokens = streamResponse.Response.Usage.InputTokensDetails.CacheWriteTokens
-					}
+					usage = relayconvert.UsageFromResponsesUsage(streamResponse.Response.Usage)
 				}
-				if streamResponse.Response.HasImageGenerationCall() {
+				if (streamResponse.Type == "response.completed" || streamResponse.Type == "response.done") && streamResponse.Response.HasImageGenerationCall() {
 					c.Set("image_generation_call", true)
 					c.Set("image_generation_call_quality", streamResponse.Response.GetQuality())
 					c.Set("image_generation_call_size", streamResponse.Response.GetSize())
@@ -146,7 +138,12 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 		usage.PromptTokens = info.GetEstimatePromptTokens()
 	}
 
-	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	if usage.TotalTokens == 0 {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	// Resolve an eligible request into a no-claim audit state even when the
+	// upstream never supplied authoritative usage.
+	service.ApplyPromptCacheDiscountExpiry(c, info, usage, false)
 
 	return usage, nil
 }

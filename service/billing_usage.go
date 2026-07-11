@@ -102,6 +102,12 @@ func usageFromBillingUsage(usage *dto.Usage) (*dto.Usage, bool) {
 
 func usageFromOpenAIBillingUsage(billingUsage *dto.BillingUsage) *dto.Usage {
 	usage := *billingUsage.OpenAIUsage
+	// Responses-format usage reports cache reads only in input_tokens_details;
+	// billing reads PromptTokensDetails, so an unmapped detail block would bill
+	// cached tokens at full input price.
+	if usage.PromptTokensDetails == (dto.InputTokenDetails{}) && usage.InputTokensDetails != nil {
+		usage.PromptTokensDetails = *usage.InputTokensDetails
+	}
 	if usage.PromptTokens == 0 && usage.InputTokens > 0 {
 		usage.PromptTokens = usage.InputTokens
 	}

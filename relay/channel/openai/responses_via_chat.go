@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
@@ -34,6 +35,7 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if oaiError := chatResp.GetOpenAIError(); oaiError != nil && oaiError.Type != "" {
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
+	applyUsagePostProcessing(info, &chatResp.Usage, body)
 
 	if responseID := helper.GetResponseID(c); responseID != "" {
 		chatResp.Id = responseID
@@ -46,11 +48,29 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if !ok {
 		return nil, types.NewOpenAIError(fmt.Errorf("expected OpenAI responses response, got %T", convertResult.Value), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	usage := convertResult.Usage
+	canonicalUsage := chatResp.Usage
+	if chatResp.Usage.InputTokensDetails != nil {
+		details := *chatResp.Usage.InputTokensDetails
+		canonicalUsage.InputTokensDetails = &details
+	}
+	canonicalUsage.BillingUsage = dto.CloneBillingUsage(chatResp.Usage.BillingUsage)
+	if canonicalUsage.BillingUsage == nil {
+		canonicalUsage.BillingUsage = dto.NewOpenAIChatBillingUsage(&chatResp.Usage)
+	}
+	usage := &canonicalUsage
 	if usage == nil || usage.TotalTokens == 0 {
+		// locally estimated usage never claims a prompt-cache expiry cycle
 		text := service.ExtractOutputTextFromResponses(responsesResp)
 		usage = service.ResponseText2Usage(c, text, info.UpstreamModelName, info.GetEstimatePromptTokens())
 		responsesResp.Usage = relayconvert.UsageFromChatUsage(usage)
+		service.ApplyPromptCacheDiscountExpiry(c, info, usage, false)
+	} else {
+		claimEligible := len(chatResp.Choices) > 0 &&
+			strings.TrimSpace(chatResp.Choices[0].FinishReason) != "" &&
+			service.ResponsesStatusCompleted(responsesResp.Status)
+		if service.ApplyPromptCacheDiscountExpiry(c, info, usage, claimEligible) {
+			service.ApplyPromptCacheDiscountExpiry(c, info, responsesResp.Usage, false)
+		}
 	}
 
 	responseBody, err := common.Marshal(responsesResp)
@@ -77,6 +97,8 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
 	streamErr := (*types.NewAPIError)(nil)
+	sawTerminalFinishReason := false
+	var upstreamUsage *dto.Usage
 
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {
 		data, err := common.Marshal(event.Payload)
@@ -109,6 +131,22 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			sr.Error(err)
 			return
 		}
+		if chunk.Usage != nil && chunk.Usage.TotalTokens != 0 {
+			applyUsagePostProcessing(info, chunk.Usage, common.StringToByteSlice(data))
+			canonicalUsage := *chunk.Usage
+			if chunk.Usage.InputTokensDetails != nil {
+				details := *chunk.Usage.InputTokensDetails
+				canonicalUsage.InputTokensDetails = &details
+			}
+			canonicalUsage.BillingUsage = dto.CloneBillingUsage(chunk.Usage.BillingUsage)
+			if canonicalUsage.BillingUsage == nil {
+				canonicalUsage.BillingUsage = dto.NewOpenAIChatBillingUsage(chunk.Usage)
+			}
+			upstreamUsage = &canonicalUsage
+		}
+		if chunk.IsFinished() {
+			sawTerminalFinishReason = true
+		}
 
 		results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, &chunk)
 		if err != nil {
@@ -134,8 +172,10 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		return nil, streamErr
 	}
 
-	usage := state.Usage()
-	if usage == nil || usage.TotalTokens == 0 {
+	usage := upstreamUsage
+	realUpstreamUsage := usage != nil && usage.TotalTokens != 0
+	if !realUpstreamUsage {
+		// locally estimated usage never claims a prompt-cache expiry cycle
 		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.SetUsage(usage)
 	}
@@ -143,6 +183,23 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	finalResults, err := relayconvert.FinalizeStreamResponse(c, info, state)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	claimEligible := realUpstreamUsage && sawTerminalFinishReason && len(finalResults) > 0
+	if claimEligible {
+		lastEvent, ok := finalResults[len(finalResults)-1].Value.(relayconvert.ChatToResponsesStreamEvent)
+		claimEligible = ok && lastEvent.Type == "response.completed"
+	}
+	if service.ApplyPromptCacheDiscountExpiry(c, info, usage, claimEligible) {
+		for i := range finalResults {
+			event, ok := finalResults[i].Value.(relayconvert.ChatToResponsesStreamEvent)
+			if !ok {
+				continue
+			}
+			if event.Payload.Response != nil && event.Payload.Response.Usage != nil {
+				service.ApplyPromptCacheDiscountExpiry(c, info, event.Payload.Response.Usage, false)
+				finalResults[i].Value = event
+			}
+		}
 	}
 	for _, result := range finalResults {
 		event, ok := result.Value.(relayconvert.ChatToResponsesStreamEvent)

@@ -51,6 +51,74 @@
 - 新增计费路径要通读全链:validation → EstimateBilling/OtherRatios → quota 换算 → pre-consume → settle/refund,每步保持"永不产生负扣费"不变量。
 - 改分层/动态计费表达式前必读 `pkg/billingexpr/expr.md`。
 
+## Scenario: Canonical Usage vs. Protocol Usage Projection
+
+### 1. Scope / Trigger
+
+- Trigger: any relay path that converts Chat Completions, Responses, Gemini, or another provider's usage shape before billing, logging, or returning a client response.
+- Purpose: billing and audit logic must consume a canonical `dto.Usage`; protocol-specific field projection is an output-boundary concern. Mixing the two can silently drop cache-token, media-token, reasoning-token, or provider-extension fields and undercharge a request.
+
+### 2. Signatures
+
+- Chat → Responses conversion: `ChatCompletionsResponseToResponsesResponse(resp *dto.OpenAITextResponse, id string) (*dto.OpenAIResponsesResponse, *dto.Usage, error)`.
+- Chat usage projection: `UsageFromChatUsage(src *dto.Usage) *dto.Usage`.
+- Responses → canonical Chat usage mapping: `UsageFromResponsesUsage(src *dto.Usage) *dto.Usage`.
+- The converter's separate `*dto.Usage` return is the settlement/logging value; `OpenAIResponsesResponse.Usage` is the client-facing Responses projection.
+
+### 3. Contracts
+
+- Canonical Chat fields are `PromptTokens`, `CompletionTokens`, `PromptTokensDetails`, and `CompletionTokenDetails`; Responses projection fields are `InputTokens`, `OutputTokens`, and `InputTokensDetails`.
+- Chat → Responses must return an independent canonical usage value for billing while projecting `PromptTokensDetails` into `InputTokensDetails` for the client.
+- Responses → Chat must preserve the complete source usage value, deep-copy pointer-backed detail structures, and map `InputTokens`/`OutputTokens` plus cache details into their canonical aliases.
+- Preserve an upstream non-zero `TotalTokens`; derive it from mapped input + output only when the upstream total is absent.
+- Provider extensions needed by billing or audit, including cache-creation, media, reasoning, and cost fields, stay on the canonical value even when the client protocol does not expose them.
+- Any billing adjustment is applied to the canonical usage first. The client usage is then projected from that adjusted canonical value, or receives the same deterministic field adjustment without replacing the canonical value.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+|---|---|
+| Source usage is `nil` | Return an empty usage value; do not panic |
+| Upstream `TotalTokens` is non-zero | Preserve it exactly |
+| Upstream `TotalTokens` is zero | Derive it from the mapped input and output totals |
+| Both protocol aliases are present | Keep canonical and projection values semantically equal; reject/fail open before a stateful billing side effect if they conflict |
+| Nested detail pointer is present | Deep-copy before mutation so response patching cannot mutate the billing/audit snapshot |
+| Usage is malformed or outside billing bounds | Do not perform cache ownership or another stateful discount claim; retain the unadjusted usage and surface the existing request/logging path |
+| Stream only has a local estimate | It may be displayed as an estimate but must not become authoritative settlement usage or claim state |
+
+### 5. Good / Base / Bad Cases
+
+- Good: a Chat response with `PromptTokens=10000` and `CachedTokens=8000` returns Responses usage with `InputTokens=10000` and `InputTokensDetails.CachedTokens=8000`, while settlement still reads the canonical prompt fields.
+- Base: a native Responses response is normalized once, billed from its canonical mapping, and emitted with its original protocol shape.
+- Bad: replacing the settlement variable with `response.Usage` after Chat → Responses conversion; the Responses projection may not contain the canonical fields used by `postConsumeQuota` and cache pricing.
+
+### 6. Tests Required
+
+- Converter unit test: assert both the client projection and the separate canonical return, including cache-creation/media/reasoning fields and exact totals.
+- Mutation test: changing projected nested details must not change the canonical usage or original audit snapshot.
+- Stream regression: final authoritative upstream usage must produce the same canonical billing result as non-stream; estimates must not settle or claim state.
+- Billing regression: assert the exact charge for a fixture with input, cached-read, cache-creation, and output tokens; do not only assert that conversion succeeds.
+- Handler regression: cover native and converted protocols, terminal success vs. incomplete/failed responses, and first-owner vs. in-cycle behavior when a stateful discount policy is involved.
+
+### 7. Wrong vs. Correct
+
+#### Wrong
+
+```go
+responseUsage := UsageFromChatUsage(&resp.Usage)
+out.Usage = responseUsage
+return out, responseUsage, nil // settlement receives the protocol projection
+```
+
+#### Correct
+
+```go
+responseUsage := UsageFromChatUsage(&resp.Usage)
+canonicalUsage := resp.Usage
+out.Usage = responseUsage
+return out, &canonicalUsage, nil
+```
+
 ### Relay Request DTOs
 
 - 解析自客户端、再序列化给上游的请求结构,可选标量字段必须"指针 + omitempty",保证显式零值透传、缺省字段省略。真实示例(`dto/openai_request.go:37`):

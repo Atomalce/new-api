@@ -70,6 +70,16 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		responsesResp.Usage = relayconvert.UsageFromChatUsage(&usage)
 	}
 
+	// Only real upstream usageMetadata may claim a prompt-cache expiry cycle;
+	// buildUsageFromGeminiResponse falls back to estimates otherwise.
+	claimEligible := dto.HasGeminiUsageMetadataTokens(geminiResponse.GetUsageMetadata()) &&
+		service.ResponsesStatusCompleted(responsesResp.Status)
+	if service.ApplyPromptCacheDiscountExpiry(c, info, &usage, claimEligible) {
+		// mirror the owner adjustment onto the projected copy embedded in the
+		// client payload (the claim is already decided; this only re-zeroes)
+		service.ApplyPromptCacheDiscountExpiry(c, info, responsesResp.Usage, false)
+	}
+
 	responseBody, err = common.Marshal(responsesResp)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
@@ -93,6 +103,7 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 	toolCallIndexByChoice := make(map[int]map[string]int)
 	nextToolCallIndexByChoice := make(map[int]int)
 	var streamErr *types.NewAPIError
+	sawTerminalFinishReason := false
 
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {
 		data, err := common.Marshal(event.Payload)
@@ -122,8 +133,18 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 		return true
 	}
 
+	// capture the last real upstream usage so estimated fallbacks can be told
+	// apart at the claim point below
+	var realUpstreamUsage *dto.Usage
 	usage, streamAPIError := geminiStreamHandler(c, info, resp, func(data string, geminiResponse *dto.GeminiChatResponse) bool {
+		if metadata := geminiResponse.GetUsageMetadata(); dto.HasGeminiUsageMetadataTokens(metadata) {
+			mapped := buildUsageFromGeminiMetadata(metadata, info.GetEstimatePromptTokens())
+			realUpstreamUsage = &mapped
+		}
 		response, isStop := streamResponseGeminiChat2OpenAI(geminiResponse)
+		if isStop || response.IsFinished() {
+			sawTerminalFinishReason = true
+		}
 		response.Id = responseID
 		response.Created = created
 		response.Model = info.UpstreamModelName
@@ -175,6 +196,30 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 	finalResults, err := relayconvert.FinalizeStreamResponse(c, info, state)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	// Claim only when the settled usage is the untouched real upstream
+	// usageMetadata (geminiStreamHandler may replace it with estimates) and
+	// the terminal event is response.completed.
+	claimEligible := usage != nil && realUpstreamUsage != nil && sawTerminalFinishReason &&
+		usage.PromptTokens == realUpstreamUsage.PromptTokens &&
+		usage.CompletionTokens == realUpstreamUsage.CompletionTokens &&
+		usage.TotalTokens == realUpstreamUsage.TotalTokens &&
+		len(finalResults) > 0
+	if claimEligible {
+		lastEvent, ok := finalResults[len(finalResults)-1].Value.(relayconvert.ChatToResponsesStreamEvent)
+		claimEligible = ok && lastEvent.Type == "response.completed"
+	}
+	if service.ApplyPromptCacheDiscountExpiry(c, info, usage, claimEligible) {
+		for i := range finalResults {
+			event, ok := finalResults[i].Value.(relayconvert.ChatToResponsesStreamEvent)
+			if !ok {
+				continue
+			}
+			if event.Payload.Response != nil && event.Payload.Response.Usage != nil {
+				service.ApplyPromptCacheDiscountExpiry(c, info, event.Payload.Response.Usage, false)
+				finalResults[i].Value = event
+			}
+		}
 	}
 	for _, result := range finalResults {
 		event, ok := result.Value.(relayconvert.ChatToResponsesStreamEvent)

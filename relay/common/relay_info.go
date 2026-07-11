@@ -173,6 +173,12 @@ type RelayInfo struct {
 	TieredBillingSnapshot *billingexpr.BillingSnapshot
 	BillingRequestInput   *billingexpr.RequestInput
 
+	// PromptCacheExpiry holds the request-scoped state of the Codex
+	// /v1/responses prompt-cache discount expiry policy. Nil until the policy
+	// is first consulted; the resolved decision is sticky across retries and
+	// stream events. See service/prompt_cache_expiry.go.
+	PromptCacheExpiry *PromptCacheExpiryState
+
 	Request dto.Request
 
 	// RequestConversionChain records request format conversions in order, e.g.

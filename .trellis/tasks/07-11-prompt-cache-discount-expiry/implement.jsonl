@@ -1,0 +1,11 @@
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/prd.md","reason":"Authoritative fixed-180s Codex Responses requirements, selected prompt_cache_key/Session_id lineage identity, numeric usage contract, and acceptance criteria."}
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/design.md","reason":"Authoritative eligibility, Redis cycle, response mutation boundary, billing data flow, and rollout design."}
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/research.md","reason":"Current code-confirmed Codex scope facts plus response and settlement boundary inventory; historical out-of-scope findings are labeled."}
+{"file":"pkg/billingexpr/expr.md","reason":"Required dynamic billing contract: clearing cr must restore cached input to p while preserving len."}
+{"file":"relay/common/relay_info.go","reason":"Incoming request, headers, request id, relay mode, retry-shared state, and the request-scoped policy state insertion point."}
+{"file":"relay/channel/openai/relay_responses.go","reason":"Native Responses stream and non-stream currently emit client bytes before or alongside usage extraction; primary patch boundary."}
+{"file":"relay/channel/openai/responses_via_chat.go","reason":"Chat-to-Responses conversion must project the same adjusted usage exactly once."}
+{"file":"relay/channel/gemini/relay_responses.go","reason":"Gemini Responses conversion and streaming usageMetadata boundary must reuse the shared decision."}
+{"file":"service/text_quota.go","reason":"Legacy ratio settlement and consume-log fields must consume the adjusted usage while audit consumers retain the original snapshot."}
+{"file":"service/tiered_settle.go","reason":"tiered_expr must receive owner p=full input, cr=0, and unchanged len."}
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/research-merged-code-anchors.md","reason":"Research-only file and symbol hazards from the earlier iteration; never use its archived scope, identity, interval, or fail-mode decisions over current PRD/design."}

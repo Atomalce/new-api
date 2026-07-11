@@ -78,6 +78,86 @@ func RedisGet(key string) (string, error) {
 	return val, err
 }
 
+// ensurePersistentValueScript atomically creates a persistent key, accepts an
+// existing matching value, and removes any legacy TTL from that matching key.
+// A different existing value is preserved and reported to the caller.
+var ensurePersistentValueScript = redis.NewScript(`
+local v = redis.call('GET', KEYS[1])
+if v == false then
+  redis.call('SET', KEYS[1], ARGV[1])
+  return {1, ARGV[1]}
+end
+if v == ARGV[1] then
+  redis.call('PERSIST', KEYS[1])
+  return {1, v}
+end
+return {0, v}
+`)
+
+// RedisEnsurePersistentValue atomically ensures that key stores value without
+// an expiry. It returns matched=false with the existing value when the key is
+// already owned by a different value.
+func RedisEnsurePersistentValue(key string, value string) (matched bool, existing string, err error) {
+	if DebugEnabled {
+		SysLog(fmt.Sprintf("Redis ENSURE PERSISTENT VALUE: key=%s", key))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := ensurePersistentValueScript.Run(ctx, RDB, []string{key}, value).Result()
+	if err != nil {
+		return false, "", err
+	}
+	arr, ok := res.([]interface{})
+	if !ok || len(arr) != 2 {
+		return false, "", fmt.Errorf("unexpected persistent-value script result: %v", res)
+	}
+	matchedValue, _ := arr[0].(int64)
+	existing, _ = arr[1].(string)
+	return matchedValue == 1, existing, nil
+}
+
+// claimCycleOwnerScript atomically claims a fixed-TTL cycle: an absent key is
+// created with the caller's owner value and TTL; an existing key is never
+// refreshed. Returns {owned, currentOwner}.
+var claimCycleOwnerScript = redis.NewScript(`
+local v = redis.call('GET', KEYS[1])
+if v == false then
+  redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2])
+  return {1, ARGV[1]}
+end
+if v == ARGV[1] then
+  return {1, v}
+end
+return {0, v}
+`)
+
+// RedisClaimCycleOwner atomically claims ownership of the cycle identified by
+// key. The first caller for an absent key becomes the owner and starts a new
+// cycle with the given TTL; re-claiming with the same owner value is
+// idempotent (replay-safe) and never refreshes the TTL. It returns whether
+// the caller owns the cycle and the current owner value stored in Redis.
+func RedisClaimCycleOwner(key string, owner string, ttl time.Duration) (bool, string, error) {
+	if ttl < time.Second {
+		return false, "", fmt.Errorf("cycle TTL must be at least one second: %v", ttl)
+	}
+	if DebugEnabled {
+		SysLog(fmt.Sprintf("Redis CLAIM CYCLE: key=%s, ttl=%v", key, ttl))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	res, err := claimCycleOwnerScript.Run(ctx, RDB, []string{key}, owner, int(ttl.Seconds())).Result()
+	if err != nil {
+		return false, "", err
+	}
+	arr, ok := res.([]interface{})
+	if !ok || len(arr) != 2 {
+		return false, "", fmt.Errorf("unexpected claim script result: %v", res)
+	}
+	owned, _ := arr[0].(int64)
+	currentOwner, _ := arr[1].(string)
+	return owned == 1, currentOwner, nil
+}
+
 //func RedisExpire(key string, expiration time.Duration) error {
 //	ctx := context.Background()
 //	return RDB.Expire(ctx, key, expiration).Err()

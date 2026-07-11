@@ -278,6 +278,43 @@ func TestCalculateTextQuotaSummaryUsesOpenAIBillingUsageBeforeTopLevelUsage(t *t
 	require.Equal(t, 98, summary.Quota)
 }
 
+func TestCalculateTextQuotaSummaryKeepsResponsesCachedTokenDiscount(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		RelayFormat:     types.RelayFormatOpenAIResponses,
+		OriginModelName: "gpt-4o",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 2,
+			CacheRatio:      0.1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		StartTime: time.Now(),
+	}
+
+	// Responses-format upstream usage carries cache reads only in
+	// input_tokens_details; the billing remap must not lose the discount.
+	usage := &dto.Usage{
+		InputTokens:  100,
+		OutputTokens: 10,
+		TotalTokens:  110,
+		InputTokensDetails: &dto.InputTokenDetails{
+			CachedTokens: 60,
+		},
+	}
+	usage.BillingUsage = dto.NewOpenAIResponsesBillingUsage(usage)
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, effectiveBillingUsage(usage))
+
+	require.Equal(t, 100, summary.PromptTokens)
+	require.Equal(t, 10, summary.CompletionTokens)
+	require.Equal(t, 60, summary.CacheTokens)
+	require.Equal(t, 66, summary.Quota)
+}
+
 func TestUsageBillingPathForLog(t *testing.T) {
 	require.Equal(t, usageBillingPathLocal, usageBillingPathForLog(true, &dto.Usage{
 		BillingUsage: dto.NewClaudeMessagesBillingUsage(&dto.ClaudeUsage{InputTokens: 1}),
@@ -501,6 +538,47 @@ func TestCalculateTextQuotaSummarySeparatesOpenRouterCacheCreationFromPromptBill
 	// quota = (2604 - 100) + 100*1.25 + 383 = 3012
 	require.Equal(t, 2604, summary.PromptTokens)
 	require.Equal(t, 3012, summary.Quota)
+}
+
+func TestCalculateTextQuotaSummaryUsesPreExpiryUsageForOpenRouterCacheCreationInference(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	original := &dto.Usage{
+		PromptTokens:     10000,
+		CompletionTokens: 500,
+		Cost:             float64(0.009975),
+		PromptTokensDetails: dto.InputTokenDetails{
+			CachedTokens: 8000,
+		},
+	}
+	adjusted := *original
+	adjusted.PromptTokensDetails.CachedTokens = 0
+	relayInfo := &relaycommon.RelayInfo{
+		FinalRequestRelayFormat: types.RelayFormatClaude,
+		OriginModelName:         "claude-3-5-sonnet-20241022",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeOpenRouter,
+		},
+		PriceData: types.PriceData{
+			ModelRatio:         1.5,
+			CompletionRatio:    1,
+			CacheRatio:         0.1,
+			CacheCreationRatio: 1.25,
+			GroupRatioInfo:     types.GroupRatioInfo{GroupRatio: 1},
+		},
+		PromptCacheExpiry: &relaycommon.PromptCacheExpiryState{
+			OriginalUsage: original,
+		},
+		StartTime: time.Now(),
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, &adjusted)
+
+	require.Equal(t, 100, summary.CacheCreationTokens)
+	require.Equal(t, 9900, summary.PromptTokens,
+		"cache reads stay full-price while inferred cache creation remains separately priced")
 }
 
 func TestCalculateTextQuotaSummaryKeepsPrePRClaudeOpenRouterBilling(t *testing.T) {

@@ -1,0 +1,11 @@
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/prd.md","reason":"Verify every accepted requirement, especially strict Codex scope, fixed 180s timing, selected prompt_cache_key/Session_id lineage identity, and the exact 10000/8000/500 contract."}
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/design.md","reason":"Review eligibility before Redis, one request-scoped decision, atomic no-refresh cycle, response-before-flush mutation, and rollback behavior."}
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/implement.md","reason":"Check ordered execution, unresolved-decision gate, validation commands, and high-risk integration points."}
+{"file":"pkg/billingexpr/expr.md","reason":"Confirm adjusted usage follows the expression contract: p includes reclassified cache tokens, cr is zero, len is unchanged."}
+{"file":"relay/common/relay_info.go","reason":"Audit Codex signals, original request/header availability, request idempotency, retry state, and deep-copy ownership."}
+{"file":"relay/channel/openai/relay_responses.go","reason":"Verify native Responses bodies and all usage-bearing terminal SSE events are patched before client emission."}
+{"file":"relay/channel/openai/responses_via_chat.go","reason":"Verify Chat-to-Responses conversion applies the shared policy once and preserves unknown/remaining usage fields."}
+{"file":"relay/channel/gemini/relay_responses.go","reason":"Verify Gemini metadata is adjusted before Responses projection and settlement uses the same snapshot."}
+{"file":"service/text_quota.go","reason":"Verify user/channel settlement and consume logs use adjusted public values without corrupting original telemetry or cache-creation inference."}
+{"file":"service/tiered_settle.go","reason":"Verify tiered_expr owner inputs and unchanged context length with exact assertions."}
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/research-merged-code-anchors.md","reason":"Use only current Responses-specific symbol hazards; reject archived scope, interval, identity, and fail-mode decisions that conflict with PRD/design."}
