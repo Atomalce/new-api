@@ -42,12 +42,14 @@ const filterBySelectedValues = (
 type BuildModelRatioColumnsOptions = {
   onDelete: (name: string) => void
   onEdit: (model: ModelRow) => void
+  deleteDisabled?: boolean
   t: (key: string) => string
 }
 
 export function buildModelRatioColumns({
   onDelete,
   onEdit,
+  deleteDisabled,
   t,
 }: BuildModelRatioColumnsOptions): ColumnDef<ModelRow>[] {
   return [
@@ -113,6 +115,7 @@ export function buildModelRatioColumns({
           variant={getModeVariant(row.original.billingMode)}
           copyable={false}
           showDot={false}
+          className='-ml-1.5 px-0'
         />
       ),
       filterFn: (row, id, value) =>
@@ -150,6 +153,7 @@ export function buildModelRatioColumns({
           menuLabel={t('Open menu')}
           onEdit={() => onEdit(row.original)}
           onDelete={() => onDelete(row.original.name)}
+          deleteDisabled={deleteDisabled}
         />
       ),
       enableHiding: false,
