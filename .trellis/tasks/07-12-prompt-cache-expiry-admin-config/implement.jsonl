@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/07-12-prompt-cache-expiry-admin-config/prd.md","reason":"Authoritative requirements: runtime toggle + cycle seconds, defaults preserving b50eb27a behavior, clamp bounds, acceptance criteria."}
+{"file":".trellis/tasks/07-12-prompt-cache-expiry-admin-config/design.md","reason":"Authoritative technical design: registered-config reuse, gate/TTL/audit wiring points in service/prompt_cache_expiry.go, frontend section plan, unchanged startup-validation decision."}
+{"file":".trellis/tasks/07-11-prompt-cache-discount-expiry/design.md","reason":"Base policy design this task parameterizes: eligibility, Redis cycle claim, sticky per-request decision, fail-open semantics that must not change."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Backend quality/billing-safety rules added by task 07-11; the clamp and audit changes must comply."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Frontend section component conventions for the new billing settings section."}
+{"file":".trellis/spec/frontend/type-safety.md","reason":"Dotted option-key typing conventions for BillingSettings additions in types.ts."}

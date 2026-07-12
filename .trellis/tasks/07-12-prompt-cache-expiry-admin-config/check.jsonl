@@ -1,0 +1,4 @@
+{"file":".trellis/tasks/07-12-prompt-cache-expiry-admin-config/prd.md","reason":"Acceptance criteria: no-restart toggle/TTL effect, clamp coverage, unchanged defaults, audit ttl_seconds accuracy, 6-locale i18n."}
+{"file":".trellis/tasks/07-12-prompt-cache-expiry-admin-config/design.md","reason":"Check gate/TTL/audit wiring matches design; startup validation and claim semantics must be unchanged from task 07-11."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Verify billing-safety invariants (bounded operator input, no bare casts, audited saturation) and test style (testify require/assert)."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Frontend quality bar for the new settings section (i18n keys, build checks)."}

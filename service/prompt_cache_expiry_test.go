@@ -12,6 +12,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/alicebob/miniredis/v2"
@@ -50,11 +51,17 @@ func setupPromptCacheExpiry(t *testing.T, claim func(string, string, time.Durati
 	t.Helper()
 	prevActive := promptCacheExpiryActive
 	prevClaim := promptCacheExpiryClaimFunc
+	prevSetting := *operation_setting.GetPromptCacheExpirySetting()
 	promptCacheExpiryActive = true
 	promptCacheExpiryClaimFunc = claim
+	*operation_setting.GetPromptCacheExpirySetting() = operation_setting.PromptCacheExpirySetting{
+		Enabled:      true,
+		CycleSeconds: 60,
+	}
 	t.Cleanup(func() {
 		promptCacheExpiryActive = prevActive
 		promptCacheExpiryClaimFunc = prevClaim
+		*operation_setting.GetPromptCacheExpirySetting() = prevSetting
 	})
 }
 
@@ -156,6 +163,53 @@ func TestPromptCacheExpiryInactivePolicyIsNoOp(t *testing.T) {
 	assert.True(t, info.PromptCacheExpiry.Ineligible)
 	assert.Equal(t, 0, fake.calls)
 	assert.Equal(t, 8000, usage.PromptTokensDetails.CachedTokens)
+}
+
+func TestPromptCacheExpiryDisabledSettingIsNoOp(t *testing.T) {
+	fake := &fakeCycleClaim{owned: true}
+	setupPromptCacheExpiry(t, fake.claim)
+	operation_setting.GetPromptCacheExpirySetting().Enabled = false
+
+	info := codexRelayInfo(t)
+	usage := codexUsage()
+	require.False(t, ApplyPromptCacheDiscountExpiry(testGinContext(t), info, usage, true))
+	assert.True(t, info.PromptCacheExpiry.Ineligible)
+	assert.Equal(t, 0, fake.calls, "disabled policy must never touch redis")
+	assert.Equal(t, 8000, usage.PromptTokensDetails.CachedTokens, "upstream discount must be preserved")
+}
+
+func TestPromptCacheExpiryClaimTTLFollowsSetting(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured int
+		wantTTL    int
+	}{
+		{"configured value in range", 300, 300},
+		{"zero clamped to minimum", 0, operation_setting.PromptCacheExpiryMinCycleSeconds},
+		{"negative clamped to minimum", -5, operation_setting.PromptCacheExpiryMinCycleSeconds},
+		{"oversized clamped to maximum", 999999, operation_setting.PromptCacheExpiryMaxCycleSeconds},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotTTL time.Duration
+			fake := &fakeCycleClaim{owned: true}
+			setupPromptCacheExpiry(t, func(key, owner string, ttl time.Duration) (bool, string, error) {
+				gotTTL = ttl
+				return fake.claim(key, owner, ttl)
+			})
+			operation_setting.GetPromptCacheExpirySetting().CycleSeconds = tt.configured
+
+			info := codexRelayInfo(t)
+			require.True(t, ApplyPromptCacheDiscountExpiry(testGinContext(t), info, codexUsage(), true))
+			assert.Equal(t, time.Duration(tt.wantTTL)*time.Second, gotTTL)
+			assert.Equal(t, tt.wantTTL, info.PromptCacheExpiry.ClaimTTLSeconds)
+
+			other := map[string]interface{}{}
+			attachPromptCacheExpiryAudit(info, other)
+			audit := other["admin_info"].(map[string]interface{})["prompt_cache_discount_expiry"].(map[string]interface{})
+			assert.Equal(t, tt.wantTTL, audit["ttl_seconds"], "audit must report the TTL actually used for the claim")
+		})
+	}
 }
 
 func TestPromptCacheExpiryIdentityResolution(t *testing.T) {
@@ -625,7 +679,7 @@ func TestPromptCacheExpiryAudit(t *testing.T) {
 		audit, ok := adminInfo["prompt_cache_discount_expiry"].(map[string]interface{})
 		require.True(t, ok)
 		assert.Equal(t, "cycle_owner", audit["reason"])
-		assert.Equal(t, "codex_responses_60s", audit["rule"])
+		assert.Equal(t, "codex_responses", audit["rule"])
 		assert.Equal(t, relaycommon.PromptCacheExpiryAccountingIncludedInInput, audit["mode"])
 		assert.Equal(t, 60, audit["ttl_seconds"])
 		assert.Equal(t, "req-1", audit["owner_request_id"])

@@ -9,8 +9,8 @@ type PromptCacheExpiryDecision int
 const (
 	// PromptCacheExpiryPending means no claim has been attempted yet.
 	PromptCacheExpiryPending PromptCacheExpiryDecision = iota
-	// PromptCacheExpiryOwner means this request opened the current 180s cycle:
-	// its cache-read discount is revoked.
+	// PromptCacheExpiryOwner means this request opened the current cycle: its
+	// cache-read discount is revoked.
 	PromptCacheExpiryOwner
 	// PromptCacheExpiryInCycle means another request owns the active cycle:
 	// the upstream discount is preserved.
@@ -58,6 +58,10 @@ type PromptCacheExpiryState struct {
 	Decision PromptCacheExpiryDecision
 	// OwnerRequestId is the request id stored in Redis for the active cycle.
 	OwnerRequestId string
+	// ClaimTTLSeconds is the clamped cycle length actually passed to the Redis
+	// claim, recorded so the audit reports the TTL in force at claim time even
+	// if an admin changes the setting before the consume log is written.
+	ClaimTTLSeconds int
 
 	// OriginalUsage is an immutable pre-adjustment deep copy of the usage the
 	// owner reclassified, kept for admin audit and raw cache telemetry.

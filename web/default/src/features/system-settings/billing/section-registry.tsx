@@ -20,6 +20,7 @@ import { parseCurrencyDisplayType } from '@/lib/currency'
 
 import { CheckinSettingsSection } from '../general/checkin-settings-section'
 import { PricingSection } from '../general/pricing-section'
+import { PromptCacheExpirySettingsSection } from '../general/prompt-cache-expiry-settings-section'
 import { QuotaSettingsSection } from '../general/quota-settings-section'
 import { PaymentSettingsSection } from '../integrations/payment-settings-section'
 import { RatioSettingsCard } from '../models/ratio-settings-card'
@@ -196,6 +197,18 @@ const BILLING_SECTIONS = [
           enabled: settings['checkin_setting.enabled'],
           minQuota: settings['checkin_setting.min_quota'],
           maxQuota: settings['checkin_setting.max_quota'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'prompt-cache-expiry',
+    titleKey: 'Prompt Cache Expiry Billing',
+    build: (settings: BillingSettings) => (
+      <PromptCacheExpirySettingsSection
+        defaultValues={{
+          enabled: settings['prompt_cache_expiry_setting.enabled'],
+          cycleSeconds: settings['prompt_cache_expiry_setting.cycle_seconds'],
         }}
       />
     ),

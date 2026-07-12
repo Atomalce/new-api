@@ -105,6 +105,8 @@ const defaultBillingSettings: BillingSettings = {
   'checkin_setting.enabled': false,
   'checkin_setting.min_quota': 1000,
   'checkin_setting.max_quota': 10000,
+  'prompt_cache_expiry_setting.enabled': true,
+  'prompt_cache_expiry_setting.cycle_seconds': 60,
 }
 
 export function BillingSettings() {

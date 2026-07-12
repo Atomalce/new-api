@@ -130,6 +130,7 @@ const buttonVariants = cva('inline-flex items-center ...', {
 - 用户可见文案必须 `useTranslation()` + `t('English key')`,key 即英文原文,locale 文件为 `web/default/src/i18n/locales/{lang}.json` 的 flat JSON。真实示例:`t('Create API Key')`(`api-keys-primary-buttons.tsx`)。
 - 子组件自行调用 `useTranslation()`,不依赖父组件传入 `t`。
 - feature `constants.ts` 中的 `SUCCESS_MESSAGES`/`ERROR_MESSAGES` 存的是 i18n key,展示时必须包 `t()`:`toast.success(t(SUCCESS_MESSAGES.API_KEY_CREATED))`。
+- 陷阱:间接经 `t()` 渲染的字符串 prop 也是 i18n key。`SettingsPageFormActions` 的 `saveLabel` 在 `settings-page-context.tsx` 内部包 `t(saveLabel)`,新增 settings section 时该字符串必须同步写入全部 locale 文件(2026-07-12 实测遗漏后非英文界面直接显示英文 key)。`scripts/sync-i18n.mjs` 只以 `en.json` 为基准对齐各 locale,不扫描源码,新 key 需手工先加进 locale 文件再跑 `i18n:sync` 归一化。
 
 ---
 

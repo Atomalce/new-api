@@ -13,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -22,26 +23,26 @@ import (
 
 // Codex /v1/responses prompt-cache discount expiry policy.
 //
-// Every 60 seconds, the first positively identified Codex request for the
-// same logical cache lineage (request-body prompt_cache_key, falling back to
-// the Session_id header) becomes the cycle owner: its upstream-reported
-// cache-read tokens are reclassified as normal full-price input. Billing,
-// consume logs, and the client-visible response usage are all driven by that
-// single request-scoped decision. The policy never touches the provider's
-// physical prompt cache.
+// Every cycle (admin-configured length, default 60 seconds), the first
+// positively identified Codex request for the same logical cache lineage
+// (request-body prompt_cache_key, falling back to the Session_id header)
+// becomes the cycle owner: its upstream-reported cache-read tokens are
+// reclassified as normal full-price input. Billing, consume logs, and the
+// client-visible response usage are all driven by that single request-scoped
+// decision. The policy never touches the provider's physical prompt cache.
+// Discounted requests inside a cycle never refresh its expiry.
 //
-// The policy is always on for eligible traffic and has no runtime switch. It
-// requires a shared Redis and an explicitly configured shared secret; without
-// Redis the process starts in compatibility no-op mode (user decision, task
-// 07-11-prompt-cache-discount-expiry Q3).
+// The toggle and cycle length live in prompt_cache_expiry_setting
+// (setting/operation_setting), editable from the admin dashboard at runtime
+// (task 07-12-prompt-cache-expiry-admin-config). The policy still requires a
+// shared Redis and an explicitly configured shared secret; without Redis the
+// process starts in compatibility no-op mode regardless of the setting (user
+// decision, task 07-11-prompt-cache-discount-expiry Q3).
 const (
 	promptCacheExpiryPolicyVersion = "v1"
-	promptCacheExpiryRuleName      = "codex_responses_60s"
+	promptCacheExpiryRuleName      = "codex_responses"
 	promptCacheExpiryIdentityType  = "codex_cache_lineage"
 	promptCacheExpiryClientPath    = "/v1/responses"
-	// PromptCacheExpiryCycleSeconds is the fixed cycle length. Discounted
-	// requests inside the cycle never refresh it.
-	PromptCacheExpiryCycleSeconds = 60
 
 	promptCacheExpiryKeyPrefix   = "pce:" + promptCacheExpiryPolicyVersion + ":c:"
 	promptCacheExpirySentinelKey = "pce:" + promptCacheExpiryPolicyVersion + ":secret_fp"
@@ -74,7 +75,8 @@ func InitPromptCacheDiscountExpiry() {
 	}
 	promptCacheExpiryClaimFunc = common.RedisClaimCycleOwner
 	promptCacheExpiryActive = true
-	common.SysLog(fmt.Sprintf("[prompt_cache_expiry] active: rule=%s ttl=%ds path=%s", promptCacheExpiryRuleName, PromptCacheExpiryCycleSeconds, promptCacheExpiryClientPath))
+	cfg := operation_setting.GetPromptCacheExpirySetting()
+	common.SysLog(fmt.Sprintf("[prompt_cache_expiry] active: rule=%s enabled=%t ttl=%ds path=%s", promptCacheExpiryRuleName, cfg.Enabled, cfg.EffectiveCycleSeconds(), promptCacheExpiryClientPath))
 }
 
 func validatePromptCacheExpiryStartup() error {
@@ -113,8 +115,10 @@ func resolvePromptCacheExpiryState(info *relaycommon.RelayInfo) *relaycommon.Pro
 
 	// Scope gate: only the exact /v1/responses client path (the compaction
 	// endpoint uses a distinct relay format) on real, billable requests, and
-	// only while the policy is active.
-	if !promptCacheExpiryActive || info.RelayFormat != types.RelayFormatOpenAIResponses || info.IsChannelTest {
+	// only while the policy is both infrastructure-active (Redis + secret)
+	// and switched on by the admin setting.
+	if !promptCacheExpiryActive || !operation_setting.GetPromptCacheExpirySetting().Enabled ||
+		info.RelayFormat != types.RelayFormatOpenAIResponses || info.IsChannelTest {
 		st.Ineligible = true
 		return st
 	}
@@ -342,7 +346,7 @@ func validPromptCacheExpiryUsage(usage *dto.Usage) bool {
 }
 
 // ApplyPromptCacheDiscountExpiry decides once whether this request owns the
-// current 60-second cycle and, when it does, reclassifies the given usage:
+// current cycle and, when it does, reclassifies the given usage:
 // the input total stays unchanged and every cache-read alias is zeroed, so the
 // full input is billed at the normal input price. The decision is sticky:
 // claim success, claim failure, and Redis errors are all reused by later
@@ -388,12 +392,14 @@ func ApplyPromptCacheDiscountExpiry(c *gin.Context, info *relaycommon.RelayInfo,
 			logger.LogWarn(c, "[prompt_cache_expiry] claim primitive unavailable, fail-open (upstream discount preserved)")
 			return false
 		}
-		owned, currentOwner, err := claim(promptCacheExpiryKeyPrefix+st.IdentityDigest, info.RequestId, PromptCacheExpiryCycleSeconds*time.Second)
+		ttlSeconds := operation_setting.GetPromptCacheExpirySetting().EffectiveCycleSeconds()
+		owned, currentOwner, err := claim(promptCacheExpiryKeyPrefix+st.IdentityDigest, info.RequestId, time.Duration(ttlSeconds)*time.Second)
 		if err != nil {
 			st.Decision = relaycommon.PromptCacheExpiryFailOpen
 			logger.LogWarn(c, fmt.Sprintf("[prompt_cache_expiry] redis claim failed, fail-open (upstream discount preserved): %s", err.Error()))
 			return false
 		}
+		st.ClaimTTLSeconds = ttlSeconds
 		st.OwnerRequestId = currentOwner
 		if owned {
 			st.Decision = relaycommon.PromptCacheExpiryOwner
@@ -509,9 +515,15 @@ func attachPromptCacheExpiryAudit(relayInfo *relaycommon.RelayInfo, other map[st
 	if st.Ineligible {
 		return
 	}
+	ttlSeconds := st.ClaimTTLSeconds
+	if ttlSeconds <= 0 {
+		// No claim was made (skip/fail-open/no claim point); report the
+		// currently configured value as informational context.
+		ttlSeconds = operation_setting.GetPromptCacheExpirySetting().EffectiveCycleSeconds()
+	}
 	audit := map[string]interface{}{
 		"rule":        promptCacheExpiryRuleName,
-		"ttl_seconds": PromptCacheExpiryCycleSeconds,
+		"ttl_seconds": ttlSeconds,
 	}
 	if st.AccountingMode != "" {
 		audit["mode"] = st.AccountingMode
