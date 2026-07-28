@@ -42,22 +42,22 @@ prompt-cache expiry billing policy and admin settings.
 
 ## Acceptance Criteria
 
-- [ ] `main`, `origin/main`, and the fixed upstream target resolve to the same
+- [x] `main`, `origin/main`, and the fixed upstream target resolve to the same
       commit.
-- [ ] `git merge-base --is-ancestor afe16c64 dev` succeeds with no unresolved
+- [x] `git merge-base --is-ancestor afe16c64 dev` succeeds with no unresolved
       paths or conflict markers.
-- [ ] Focused cache-expiry tests cover owner, in-cycle, fail-open, terminal SSE,
+- [x] Focused cache-expiry tests cover owner, in-cycle, fail-open, terminal SSE,
       response projection, billing usage, audit, and configurable TTL behavior.
-- [ ] Backend formatting, module consistency, build, full tests, and focused
+- [x] Backend formatting, module consistency, build, full tests, and focused
       cache-expiry race tests pass for both the root module and RelayKit where
       applicable; any full-repository vet baseline from the fixed upstream
       target is reproduced and documented separately.
-- [ ] Frontend frozen dependency install, format/copyright checks, typecheck,
+- [x] Frontend frozen dependency install, format/copyright checks, typecheck,
       tests, production build, and changed-file lint pass from `web`; any
       full-repository lint baseline is documented separately.
-- [ ] GHCR override/workflow and the cache settings UI remain present.
-- [ ] `git diff --check` reports no whitespace errors.
-- [ ] The verified merge and Trellis lifecycle commits are pushed to
+- [x] GHCR override/workflow and the cache settings UI remain present.
+- [x] `git diff --check` reports no whitespace errors.
+- [x] The verified merge and Trellis lifecycle commits are pushed to
       `origin/dev`, and remote `dev` equals local `HEAD`.
 
 ## Out of Scope

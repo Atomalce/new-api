@@ -34,3 +34,12 @@
 - No live provider, deployed service, production database, or Redis cache-cycle
   validation was performed; those operations are outside this repository-only
   synchronization.
+
+## Delivery
+
+- Merge commit: `51e46eb0f2b1852785e9dc4e00f825a388d0d77c`, with parents
+  `4fbfafc5668d3b48ccb807816e82ff7414b682da` and
+  `afe16c64cd73853da1eda3bf236f15d69637b4bf`.
+- The merge commit was pushed to `origin/dev` and verified at zero divergence
+  before task archival. The final lifecycle push is verified after the archive
+  and session commits.
