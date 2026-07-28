@@ -6,11 +6,11 @@
 
 ## Overview
 
-本规范只约束主主题 `web/default/`(React 19 + TypeScript + Rsbuild + TanStack Router)。旧主题 `web/classic/` 为纯 JavaScript(`jsconfig.json`,prettier/eslint),不参与 TypeScript 类型检查,本文不适用。
+本规范约束扁平化后的单一前端 `web/`(React 19 + TypeScript + Rsbuild + TanStack Router)。旧的 `web/default` 与 `web/classic` 已移除。
 
 核心原则:
 
-- `strict: true` 全量开启,typecheck 零错误是交付前提(`web/default/AGENTS.md` §3.2 的硬性要求)。
+- `strict: true` 全量开启,typecheck 零错误是交付前提(`web/AGENTS.md` §3.2 的硬性要求)。
 - HTTP 响应、localStorage、URL search params 是类型信任边界:要么显式标注返回类型,要么用 Zod 做运行时校验。
 - `any` 只减不增,默认替代是 `unknown` + 类型收窄。
 
@@ -18,12 +18,12 @@
 
 ## tsconfig Strictness
 
-`web/default/tsconfig.json` 是 project references 入口,实际配置在两个子文件:
+`web/tsconfig.json` 是 project references 入口,实际配置在两个子文件:
 
-- `web/default/tsconfig.app.json` — `src/` 应用代码
-- `web/default/tsconfig.node.json` — `rsbuild.config.ts`
+- `web/tsconfig.app.json` — `src/` 应用代码
+- `web/tsconfig.node.json` — `rsbuild.config.ts`
 
-已开启的严格选项(摘自 `web/default/tsconfig.app.json`):
+已开启的严格选项(摘自 `web/tsconfig.app.json`):
 
 ```jsonc
 "strict": true,
@@ -47,7 +47,7 @@
 
 ## Type Check Commands
 
-在 `web/default/` 目录下执行,包管理器统一用 bun:
+在 `web/` 目录下执行,包管理器统一用 bun:
 
 | 命令 | 实际执行 | 用途 |
 | --- | --- | --- |
@@ -55,16 +55,16 @@
 | `bun run build:check` | `tsgo -b && rsbuild build` | CI / 交付前完整检查 |
 | `bun run lint` | `oxlint -c .oxlintrc.json .` | lint(含 typescript 插件规则) |
 
-规则(引自 `web/default/AGENTS.md` §3.2):每次改动 `.ts`/`.tsx` 后必须执行 typecheck 并修复至零错误,不得遗留;lint error 必须清零,warning 按变更范围与风险评估。
+规则(引自 `web/AGENTS.md` §3.2):每次改动 `.ts`/`.tsx` 后必须执行 typecheck 并修复至零错误,不得遗留;lint error 必须清零,warning 按变更范围与风险评估。
 
 ---
 
 ## API Response Types
 
-后端统一响应契约为 `{ success, message?, data? }`。响应类型按 feature 就近定义在 `web/default/src/features/<feature>/types.ts`,`ApiResponse<T>` 当前在各 feature 内独立声明(现状如此,新 feature 沿用此模式,不要引入新的共享位置):
+后端统一响应契约为 `{ success, message?, data? }`。响应类型按 feature 就近定义在 `web/src/features/<feature>/types.ts`,`ApiResponse<T>` 当前在各 feature 内独立声明(现状如此,新 feature 沿用此模式,不要引入新的共享位置):
 
 ```ts
-// web/default/src/features/keys/types.ts
+// web/src/features/keys/types.ts
 export interface ApiResponse<T = unknown> {
   success: boolean
   message?: string
@@ -72,17 +72,17 @@ export interface ApiResponse<T = unknown> {
 }
 ```
 
-**API 函数必须显式标注返回类型。** 统一 axios 实例(`web/default/src/lib/api.ts`)调用时不传泛型,`res.data` 是 `any`,函数签名是唯一的类型边界:
+**API 函数必须显式标注返回类型。** 统一 axios 实例(`web/src/lib/api.ts`)调用时不传泛型,`res.data` 是 `any`,函数签名是唯一的类型边界:
 
 ```ts
-// web/default/src/features/keys/api.ts
+// web/src/features/keys/api.ts
 export async function getApiKey(id: number): Promise<ApiResponse<ApiKey>> {
   const res = await api.get(`/api/token/${id}`)
   return res.data
 }
 ```
 
-仅单处使用的响应类型可就近定义在使用文件内(如 `StatusApiResponse`,`web/default/src/hooks/use-system-config.ts`);跨组件复用的放 feature 的 `types.ts`。
+仅单处使用的响应类型可就近定义在使用文件内(如 `StatusApiResponse`,`web/src/hooks/use-system-config.ts`);跨组件复用的放 feature 的 `types.ts`。
 
 ---
 
@@ -91,7 +91,7 @@ export async function getApiKey(id: number): Promise<ApiResponse<ApiKey>> {
 实体与表单类型优先从 Zod schema 推导,不手写平行的 interface:
 
 ```ts
-// web/default/src/features/keys/types.ts
+// web/src/features/keys/types.ts
 export const apiKeySchema = z.object({
   id: z.number(),
   name: z.string(),
@@ -103,15 +103,15 @@ export type ApiKey = z.infer<typeof apiKeySchema>
 
 必须做运行时校验(而非仅类型断言)的场景:
 
-- **URL search params**:路由文件用 `validateSearch` + zod schema,字段带 `.catch()` 兜底非法值(`web/default/src/routes/_authenticated/keys/index.tsx` 的 `apiKeySearchSchema`)。
-- **localStorage**:读出后必须 `schema.parse` 再使用(`web/default/src/features/playground/lib/storage/storage.ts`)。
-- **表单**:React Hook Form + `@hookform/resolvers/zod`,表单值类型用 `z.infer<typeof schema>`(`web/default/AGENTS.md` §3.7)。
+- **URL search params**:路由文件用 `validateSearch` + zod schema,字段带 `.catch()` 兜底非法值(`web/src/routes/_authenticated/keys/index.tsx` 的 `apiKeySearchSchema`)。
+- **localStorage**:读出后必须 `schema.parse` 再使用(`web/src/features/playground/lib/storage/storage.ts`)。
+- **表单**:React Hook Form + `@hookform/resolvers/zod`,表单值类型用 `z.infer<typeof schema>`(`web/AGENTS.md` §3.7)。
 
 ---
 
 ## any / Assertion Policy
 
-oxlint 相关规则(`web/default/.oxlintrc.json`):
+oxlint 相关规则(`web/.oxlintrc.json`):
 
 | 规则 | 级别 |
 | --- | --- |
@@ -122,10 +122,10 @@ oxlint 相关规则(`web/default/.oxlintrc.json`):
 
 态度与替代:
 
-- 新代码不写 `any` / `as any`。需要"类型未知"时用 `unknown` 并收窄,参考 `handleServerError(error: unknown)`(`web/default/src/lib/handle-server-error.ts`)与 `toNumber(value: unknown, fallback: number)`(`web/default/src/hooks/use-system-config.ts`)。
+- 新代码不写 `any` / `as any`。需要"类型未知"时用 `unknown` 并收窄,参考 `handleServerError(error: unknown)`(`web/src/lib/handle-server-error.ts`)与 `toNumber(value: unknown, fallback: number)`(`web/src/hooks/use-system-config.ts`)。
 - 存量 `as any` 约 10 处(集中在 system-settings 动态表单字段名等处),属技术债,只减不增。
-- 校验字面量结构优先用 `satisfies` 而非 `as`(如 `} satisfies ApiRequestConfig`,`web/default/src/features/channels/hooks/use-channel-upstream-updates.ts`)。
-- 双重断言 `as unknown as T` 仅允许用于第三方库类型缺口(典型:`zodResolver(schema) as unknown as Resolver<Values>`,`web/default/src/features/system-settings/general/checkin-settings-section.tsx`);禁止用它绕过业务数据的校验。
+- 校验字面量结构优先用 `satisfies` 而非 `as`(如 `} satisfies ApiRequestConfig`,`web/src/features/channels/hooks/use-channel-upstream-updates.ts`)。
+- 双重断言 `as unknown as T` 仅允许用于第三方库类型缺口(典型:`zodResolver(schema) as unknown as Resolver<Values>`,`web/src/features/system-settings/general/checkin-settings-section.tsx`);禁止用它绕过业务数据的校验。
 - 非空断言 `!` 为 lint error,新代码用提前返回、`?.`、显式判空替代。
 
 ---
@@ -133,16 +133,16 @@ oxlint 相关规则(`web/default/.oxlintrc.json`):
 ## Ambient Declarations & Module Augmentation
 
 - 全局声明与无类型库的 shim 放 `src/` 根下 `.d.ts`,勿散落各 feature:
-  - `web/default/src/env.d.ts` — rsbuild 类型引用 + `@visactor/react-vchart` 等模块 shim,shim 的宽泛值类型用 `Record<string, unknown>`,不用 `any`。
-  - `web/default/src/tanstack-table.d.ts` — `declare module '@tanstack/react-table'` 扩展 `ColumnMeta`(mobile 布局字段)。
-- 需要给第三方库的配置对象加自定义字段时,用 module augmentation 而不是断言,如 `web/default/src/lib/api.ts` 中扩展 `AxiosRequestConfig` 增加 `skipBusinessError` / `skipErrorHandler` / `disableDuplicate`。
+  - `web/src/env.d.ts` — rsbuild 类型引用 + `@visactor/react-vchart` 等模块 shim,shim 的宽泛值类型用 `Record<string, unknown>`,不用 `any`。
+  - `web/src/tanstack-table.d.ts` — `declare module '@tanstack/react-table'` 扩展 `ColumnMeta`(mobile 布局字段)。
+- 需要给第三方库的配置对象加自定义字段时,用 module augmentation 而不是断言,如 `web/src/lib/api.ts` 中扩展 `AxiosRequestConfig` 增加 `skipBusinessError` / `skipErrorHandler` / `disableDuplicate`。
 
 ---
 
 ## Generated & Excluded Files
 
-- `web/default/src/routeTree.gen.ts`:由 `@tanstack/router-plugin` 自动生成(文件头带 `@ts-nocheck`),禁止手改;oxlint `ignorePatterns` 已排除。
-- `web/default/src/components/ui/`:shadcn 生成的基础组件,oxlint 排除,但仍在 typecheck 范围内,改动后同样要过 `bun run typecheck`。
+- `web/src/routeTree.gen.ts`:由 `@tanstack/router-plugin` 自动生成(文件头带 `@ts-nocheck`),禁止手改;oxlint `ignorePatterns` 已排除。
+- `web/src/components/ui/`:shadcn 生成的基础组件,oxlint 排除,但仍在 typecheck 范围内,改动后同样要过 `bun run typecheck`。
 
 ---
 
@@ -156,4 +156,3 @@ oxlint 相关规则(`web/default/.oxlintrc.json`):
 - 未经 schema 校验直接消费 localStorage 或 URL search params。
 - 值风格导入仅作类型使用 —— 必须 `import type` 或 inline `type` 修饰(`typescript/consistent-type-imports` 为 error)。
 - 手改 `routeTree.gen.ts` 或其它生成文件。
-- 在 `web/classic/`(JavaScript)中新增 TypeScript 文件或对其套用本规范 —— 该主题不在类型检查体系内。

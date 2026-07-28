@@ -6,17 +6,15 @@
 
 ## Overview
 
-主题前端 `web/default/` 的状态分五类,各有唯一归属机制,不得混用:
+主题前端 `web/` 的状态分五类,各有唯一归属机制,不得混用:
 
 | 状态类别 | 方案 | 位置 |
 |---------|------|------|
 | **服务端状态**(后端 API 数据) | TanStack Query(`@tanstack/react-query` v5) | 各 feature 内 `useQuery`/`useMutation` + `features/<feature>/api.ts` |
-| **全局客户端状态**(登录用户、系统配置、通知已读) | Zustand v5 | `web/default/src/stores/` |
-| **应用级 UI 环境**(主题、字体、文字方向、布局、搜索面板) | React Context Provider | `web/default/src/context/` |
+| **全局客户端状态**(登录用户、系统配置、通知已读) | Zustand v5 | `web/src/stores/` |
+| **应用级 UI 环境**(主题、字体、文字方向、布局、搜索面板) | React Context Provider | `web/src/context/` |
 | **Feature 局部 UI 状态**(弹窗开关、当前行、刷新触发) | feature 内 Context + `useState` | `features/<feature>/components/<feature>-provider.tsx` |
 | **URL 状态**(表格分页/筛选) | TanStack Router search params | `hooks/use-table-url-state.ts` |
-
-旧主题 `web/classic/` 使用 Context + `useReducer`(`web/classic/src/context/{User,Status,Theme}`),无 zustand/react-query。classic 只做维护,不引入新的状态方案。
 
 判断归属的原则:**来自后端的数据一律是服务端状态,交给 React Query 缓存,不要复制进 Zustand 或 useState**(唯一例外见下文 system-config 同步)。会话内跨页面共享且与后端无关的才进 Zustand;单页面/单弹窗生命周期的用局部 state;需要可分享/可刷新恢复的(分页、筛选)进 URL。
 
@@ -24,7 +22,7 @@
 
 ## Server State: TanStack Query
 
-### 全局 QueryClient(`web/default/src/main.tsx`)
+### 全局 QueryClient(`web/src/main.tsx`)
 
 QueryClient 在 `main.tsx` 创建并注入 Router context(`createRouter({ context: { queryClient } })`)。全局默认值已定,业务代码不要在单个 query 上重复配置这些行为:
 
@@ -102,7 +100,7 @@ return useMutation({
 
 - `create<State>()(...)` 显式类型化 state 与 actions;actions 定义在 store 内,组件不得直接 `setState` 拼对象。
 - **持久化优先用 `persist` 中间件并 `partialize` 只落必要字段**(`system-config-store.ts:96`);`auth-store.ts` 的手动 localStorage 写法是历史存量,新 store 不要模仿。
-- 组件内**用选择器订阅**,避免整 store 订阅引发多余渲染(`web/default/AGENTS.md` 3.5):
+- 组件内**用选择器订阅**,避免整 store 订阅引发多余渲染(`web/AGENTS.md` 3.5):
 
 ```ts
 // hooks/use-sidebar-view.ts:50
@@ -158,7 +156,7 @@ export const useUsers = () => {
 
 ## URL State
 
-表格分页、全局搜索、列筛选通过 TanStack Router 的 search params 管理,统一走 `hooks/use-table-url-state.ts`(接收 route 的 `search` + `navigate`,内部映射为 `PaginationState`/`ColumnFiltersState`)。page size 持久化在 localStorage `page-size`(与 classic 主题共享同一 key,不得改名)。路由 search params 用 Zod schema + `validateSearch` 校验(`web/default/AGENTS.md` 3.8)。不要用 `useState` 私藏分页状态导致刷新丢失。
+表格分页、全局搜索、列筛选通过 TanStack Router 的 search params 管理,统一走 `hooks/use-table-url-state.ts`(接收 route 的 `search` + `navigate`,内部映射为 `PaginationState`/`ColumnFiltersState`)。page size 持久化在 localStorage `page-size`。路由 search params 用 Zod schema + `validateSearch` 校验(`web/AGENTS.md` 3.8)。不要用 `useState` 私藏分页状态导致刷新丢失。
 
 ---
 
@@ -172,16 +170,15 @@ export const useUsers = () => {
 - **禁止**整 store 订阅(`const store = useXxxStore()`)后只用其中一个字段——用选择器。存量代码中 `const { auth } = useAuthStore()` 属待清理写法,新代码不得新增。
 - **禁止**新增全局 Context 来传业务数据(Context 只用于 UI 环境与 feature 弹窗编排);也禁止为 feature 局部状态新建 Zustand store。
 - **禁止**在 store 之外的业务代码直接读写 localStorage 管理状态——持久化收敛在 store(`persist`)、theme cookie、`use-table-url-state` 的 `page-size` 等既有入口。
-- **禁止**在 classic 主题引入 zustand/react-query 或新的状态库;classic 维持 Context + `useReducer`。
 - **禁止**硬编码用户可见提示文案——toast/错误消息必须 `t('English key')`(根 AGENTS.md i18n 规则)。
 
 ---
 
 ## References
 
-- `web/default/src/main.tsx` — QueryClient 全局配置、Provider 组合、router context
-- `web/default/src/stores/` — auth-store / system-config-store / notification-store(Zustand 全量示例)
-- `web/default/src/features/users/` — api.ts + users-provider.tsx + users-table.tsx(feature 状态组织范式)
-- `web/default/src/hooks/use-status.ts`、`use-table-url-state.ts` — server→store 同步例外、URL 状态
-- `web/default/AGENTS.md` §3.5/3.6/3.8 — 状态管理、API 请求、路由细则;根 `AGENTS.md` — i18n 与 bun 等硬性规范
+- `web/src/main.tsx` — QueryClient 全局配置、Provider 组合、router context
+- `web/src/stores/` — auth-store / system-config-store / notification-store(Zustand 全量示例)
+- `web/src/features/users/` — api.ts + users-provider.tsx + users-table.tsx(feature 状态组织范式)
+- `web/src/hooks/use-status.ts`、`use-table-url-state.ts` — server→store 同步例外、URL 状态
+- `web/AGENTS.md` §3.5/3.6/3.8 — 状态管理、API 请求、路由细则;根 `AGENTS.md` — i18n 与 bun 等硬性规范
 - 同目录 `hook-guidelines.md` — 自定义 hooks 规范(状态相关 hook 的命名与拆分)

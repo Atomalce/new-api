@@ -1,6 +1,6 @@
 # Frontend Development Guidelines
 
-> Best practices for frontend development in this project (web/default, React 19 + Rsbuild).
+> Best practices for frontend development in this project (web, React 19 + Rsbuild).
 
 ---
 
@@ -17,4 +17,4 @@
 
 ---
 
-上游硬性规范见仓库根 `AGENTS.md` 与 `web/default/AGENTS.md`,冲突时以上游文件为准。
+上游硬性规范见仓库根 `AGENTS.md` 与 `web/AGENTS.md`,冲突时以上游文件为准。

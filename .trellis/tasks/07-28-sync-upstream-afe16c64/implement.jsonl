@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/fork-maintenance.md","reason":"Apply the non-rebase upstream sync workflow and preserve fork-specific GHCR delivery."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Adapt the cache billing policy to RelayKit without weakening accounting or test contracts."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Port the admin settings UI into the flattened web tree with complete i18n and validation."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Use the flattened single web application layout and do not restore Classic."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Apply current Bun, format, copyright, typecheck, test, build, and changed-file lint gates."}

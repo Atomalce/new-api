@@ -33,19 +33,22 @@ git checkout dev  && git merge main    # 冲突只在这一步解决
 |------|------|
 | `VERSION` | 仓库里是**空文件**,版本由 CI 构建时写入;**自己永远不往里写内容**,冲突取上游 |
 | `web/bun.lock` | 取上游后在 `web/` 重跑 `bun install`,提交再生成的锁文件 |
-| `web/default/src/routeTree.gen.ts` | TanStack Router 生成文件;不手解,合并后跑一次 `bun run dev` 或 `bun run build` 自动重生成 |
-| `web/default/src/i18n/locales/*.json` | flat JSON、英文原文作 key;逐 key 合并,自研文案与上游文案通常可共存 |
+| `web/src/routeTree.gen.ts` | TanStack Router 生成文件;不手解,合并后跑一次 `bun run dev` 或 `bun run build` 自动重生成 |
+| `web/src/i18n/locales/*.json` | flat JSON、英文原文作 key;逐 key 合并,自研文案与上游文案通常可共存 |
 | `go.mod` / `go.sum` | 手解依赖行后 `go mod tidy` |
+| `relaykit/go.mod` / `relaykit/go.sum` | RelayKit 是独立模块;进入 `relaykit/` 后以 `GOWORK=off` 单独 tidy/build/test |
 | `README*.md` | 上游更新频繁;自研说明放独立文档,README 冲突取上游 |
 
-合并后必跑:`go build ./... && cd web && bun run typecheck && bun run lint`。
+合并后至少跑根模块 build/test、RelayKit 独立 build/test,以及 `web/`
+的 typecheck/test/build。全仓 lint 或 vet 若命中固定上游提交自身的已知基线,
+必须确认诊断文件与 `main` 无差异,并在任务记录中列明,不得冒充本次回归或静默忽略。
 
 ---
 
 ## Fork-specific Hard Rules
 
 - **品牌与署名受 AGPLv3 附加条款保护**:不改名、不删 new-api / QuantumNous 标识、不移除 UI 里的原项目链接——这也直接缩小合并冲突面。
-- **自研代码尽量放独立文件/目录**,新后端路由前缀记得同步 `web/default/rsbuild.config.ts` 与 `web/classic/rsbuild.config.ts` 的 devProxy(现只代理 `/api` `/mj` `/pg`)。
+- **自研代码尽量放独立文件/目录**,新后端路由前缀记得同步 `web/rsbuild.config.ts` 的 devProxy。
 - **禁用上游 CI**:fork 上的 `docker-image-*.yml`、`release.yml` 没配 secrets 会跑失败,GitHub 设置里保持 Disabled;给上游提 PR 时注意 `pr-check.yml` 的 anti-slop 检查(封锁 "Generated with Claude Code" 字样)与 PR 模板。
 - **格式化只用 `bun run format`**(带版权头保护脚本),禁止裸 prettier。
 
@@ -66,8 +69,8 @@ git checkout dev  && git merge main    # 冲突只在这一步解决
 
 ```bash
 # 首次:造 go:embed 占位 dist(dist 不入库,没有它编译直接失败)
-mkdir -p web/default/dist web/classic/dist
-echo '<!doctype html><html><body>dev</body></html>' | tee web/default/dist/index.html web/classic/dist/index.html
+mkdir -p web/dist
+echo '<!doctype html><html><body>dev</body></html>' > web/dist/index.html
 
 # 后端 :3000(零外部依赖:SQLite + 内存缓存;首次进 setup 向导)
 go run main.go
@@ -76,7 +79,8 @@ go run main.go
 cd web && bun install && make -C .. dev-web
 ```
 
-`make reset-setup` 可重置首次安装向导状态。完整产物:`make build-all-web && go build -o new-api`。
+`make reset-setup` 可重置首次安装向导状态。完整产物:`cd web && bun run build`,
+再回仓库根执行 `go build -o new-api`。
 
 ---
 

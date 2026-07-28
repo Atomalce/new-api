@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/fork-maintenance.md","reason":"Review branch model, conflict playbook, frontend layout, and fork delivery invariants."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Review billing, RelayKit boundary, tests, and Go quality requirements."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Review settings component and i18n requirements after frontend flattening."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Verify no tracked web/default or web/classic paths remain after the merge."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify frontend gates and record any full-repository baseline separately."}

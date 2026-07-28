@@ -6,16 +6,15 @@
 
 ## Overview
 
-前端为 React 19 函数组件,逻辑复用统一走自定义 hooks(无 class 组件、无 HOC 新增)。两套主题的现状:
+前端为 React 19 函数组件,逻辑复用统一走自定义 hooks(无 class 组件、无 HOC 新增):
 
 | 主题 | 技术栈 | hooks 位置与命名 |
 |------|--------|-----------------|
-| `web/default/`(主) | React 19 + TS + TanStack Query/Router + Zustand | kebab-case 文件 `use-*.ts`,命名导出 `useXxx` |
-| `web/classic/`(旧) | React 18 + Vite + Semi Design,JS 为主 | `src/hooks/<domain>/useXxx.js(x)`,camelCase 文件 |
+| `web/` | React 19 + TS + TanStack Query/Router + Zustand | kebab-case 文件 `use-*.ts`,命名导出 `useXxx` |
 
-新功能一律写在 `web/default/`;改动 `web/classic/` 时遵循其既有 camelCase 约定,不要把两套风格互相搬运。本文其余部分均针对 `web/default/`。
+旧的 `web/default` 与 `web/classic` 已移除;所有前端功能都写在 `web/`。
 
-详细的组件/状态/请求规范见 `web/default/AGENTS.md`(3.3 组件、3.5 状态管理、3.6 API 请求);仓库根 `AGENTS.md` 的前端条目(bun、i18n flat JSON、英文原文作 key)与"Protected project information"条款同样约束 hooks 代码。
+详细的组件/状态/请求规范见 `web/AGENTS.md`(3.3 组件、3.5 状态管理、3.6 API 请求);仓库根 `AGENTS.md` 的前端条目(bun、i18n flat JSON、英文原文作 key)与"Protected project information"条款同样约束 hooks 代码。
 
 ---
 
@@ -40,21 +39,21 @@
 - 文件名:kebab-case,以 `use-` 开头,后缀 `.ts`(`use-copy-to-clipboard.ts`)。
 - 导出:命名导出 `export function useXxx(...)`,hook 名 camelCase 且以 `use` 开头。禁止默认导出——`src/hooks/use-dialog.ts` 末尾的 `export default useDialogState` 已标注 `@deprecated`,不要模仿。
 - 一个文件可含多个强相关 hooks(`use-dialog.ts` 同时导出 `useDialog` / `useDialogState` / `useDialogs`),但主题必须单一。
-- 类型:参数用 `type XxxOptions` / `XxxParams`,返回值多字段时定义 `XxxReturn` 或返回明确 shape 的对象;避免 `any`(`web/default/AGENTS.md` 3.2)。
+- 类型:参数用 `type XxxOptions` / `XxxParams`,返回值多字段时定义 `XxxReturn` 或返回明确 shape 的对象;避免 `any`(`web/AGENTS.md` 3.2)。
 - 文件头必须保留/携带 QuantumNous AGPL 版权注释(现有 65 个 hooks 文件全部有,受根 `AGENTS.md` 保护条款约束,不得删除)。
 
 ---
 
 ## When to Extract a Hook
 
-抽取时机(依据 `web/default/AGENTS.md` 3.3 与根 `AGENTS.md` 代码质量条目):
+抽取时机(依据 `web/AGENTS.md` 3.3 与根 `AGENTS.md` 代码质量条目):
 
 - 组件单文件超过约 200 行,且其中有可独立的 stateful 逻辑 → 抽到同 feature 的 `hooks/`。
 - 同一段逻辑被 ≥2 个组件使用 → 按复用范围放入 feature `hooks/` 或 `src/hooks/`。
 - React Query 的 `useQuery`/`useMutation` 若含 queryKey 约定、invalidate 联动、toast 等副作用,应封装成 feature hook(如 `use-update-option.ts`);纯一次性、无联动的查询允许直接写在组件里(现状如此,不强制包装)。
 - 反之:只有一个调用方、不表达稳定业务概念、纯粹为缩短组件的机械抽取——不要抽,直接内联(根 `AGENTS.md` "Common Code Quality")。
 
-Hook 与 Zustand store 的分界(`web/default/AGENTS.md` 3.5):跨页面全局状态放 `src/stores/`(`auth-store.ts`、`system-config-store.ts`、`notification-store.ts`);服务端数据用 React Query hook;组件局部可复用逻辑才是自定义 hook。hook 内需要读写 store 时,渲染路径用选择器订阅,非渲染路径(如 `queryFn` 内)用 `useXxxStore.getState()`——见 `src/hooks/use-status.ts`。
+Hook 与 Zustand store 的分界(`web/AGENTS.md` 3.5):跨页面全局状态放 `src/stores/`(`auth-store.ts`、`system-config-store.ts`、`notification-store.ts`);服务端数据用 React Query hook;组件局部可复用逻辑才是自定义 hook。hook 内需要读写 store 时,渲染路径用选择器订阅,非渲染路径(如 `queryFn` 内)用 `useXxxStore.getState()`——见 `src/hooks/use-status.ts`。
 
 ---
 
@@ -63,7 +62,7 @@ Hook 与 Zustand store 的分界(`web/default/AGENTS.md` 3.5):跨页面全局状
 查询 hook 的标准形态——薄封装 `useQuery`,API 调用来自 feature 的 `api.ts` 或 `src/lib/api`:
 
 ```ts
-// web/default/src/features/rankings/hooks/use-rankings.ts
+// web/src/features/rankings/hooks/use-rankings.ts
 export function useRankings(period: RankingPeriod) {
   return useQuery({
     queryKey: ['rankings', period],
@@ -80,7 +79,7 @@ export function useRankings(period: RankingPeriod) {
 变更 hook 用 `useMutation`,成功后 invalidate 关联 query 并 toast:
 
 ```ts
-// web/default/src/features/system-settings/hooks/use-update-option.ts(节选)
+// web/src/features/system-settings/hooks/use-update-option.ts(节选)
 export function useUpdateOption() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -130,20 +129,16 @@ export function useUpdateOption() {
 - **禁止**违反 Rules of Hooks:条件/循环/嵌套函数内调用 hook;自定义 hook 只能在函数组件或其他 hook 中调用。
 - **禁止** hook 文件使用默认导出;统一命名导出(`use-dialog.ts` 的 default export 是待清理遗留)。
 - **禁止**同名 `.ts`/`.tsx` 并存(`use-mobile.ts` 与 `use-mobile.tsx` 是历史重复,不要新增此类情况,也不要再引入第三份实现)。
-- **禁止**在 hook 中直接创建 axios 实例或裸 `fetch`;HTTP 调用只能来自 feature 的 `api.ts` 或 `src/lib/api`(统一实例含 baseURL/拦截器,`web/default/AGENTS.md` 3.6)。现有 hooks 仅允许 `import type { AxiosRequestConfig }` 这类纯类型引用。
+- **禁止**在 hook 中直接创建 axios 实例或裸 `fetch`;HTTP 调用只能来自 feature 的 `api.ts` 或 `src/lib/api`(统一实例含 baseURL/拦截器,`web/AGENTS.md` 3.6)。现有 hooks 仅允许 `import type { AxiosRequestConfig }` 这类纯类型引用。
 - **禁止**裸访问 localStorage(无 try/catch)。
 - **禁止** mutation 成功后遗漏 `invalidateQueries`——写变更 hook 时必须梳理受影响的 queryKey(参照 `use-update-option.ts` 的 `STATUS_RELATED_KEYS` 联动)。
 - **禁止**为绕过 dashboard `success:false` 判断而只写 `onError`;HTTP 200 + `success:false` 是常态失败路径。
 - **禁止**返回未稳定化的对象/函数字面量导致调用方 effect 每次重跑。
 - **禁止**删除或改写文件头的 QuantumNous 版权注释(根 `AGENTS.md` Protected project information)。
-- **禁止**把 default 主题的 hooks 直接复制进 classic(依赖栈不同:TanStack Query/Zustand vs Semi Design/JS),classic 侧改动遵循其 `src/hooks/<domain>/useXxx.jsx` 既有模式(如 `web/classic/src/hooks/common/useNotifications.js`)。
-
----
-
 ## References
 
-- `web/default/src/hooks/` — 通用 hooks 全集;`use-dialog.ts`(返回形态范例)、`use-status.ts`(Query + store 同步 + localStorage 兜底)、`use-table-url-state.ts`(路由解耦)
-- `web/default/src/features/*/hooks/` — feature 业务 hooks;`system-settings/hooks/use-update-option.ts`(mutation + invalidate 范例)
-- `web/default/src/components/data-table/hooks/` — 组件级 hooks
-- `web/default/AGENTS.md` — 3.1 i18n、3.3 组件(200 行拆分阈值)、3.5 状态管理、3.6 API 请求
+- `web/src/hooks/` — 通用 hooks 全集;`use-dialog.ts`(返回形态范例)、`use-status.ts`(Query + store 同步 + localStorage 兜底)、`use-table-url-state.ts`(路由解耦)
+- `web/src/features/*/hooks/` — feature 业务 hooks;`system-settings/hooks/use-update-option.ts`(mutation + invalidate 范例)
+- `web/src/components/data-table/hooks/` — 组件级 hooks
+- `web/AGENTS.md` — 3.1 i18n、3.3 组件(200 行拆分阈值)、3.5 状态管理、3.6 API 请求
 - 根 `AGENTS.md` — 前端条目(bun、i18n flat JSON)、Common Code Quality(单调用方助手不抽取)、Protected project information;其 JSON 包装(`common.Marshal`)、DB 三库兼容、`lockForUpdate(tx)`、`common/quota_math.go` 等条款为后端约束,不适用于前端 hooks,但同仓协作时不得与之冲突

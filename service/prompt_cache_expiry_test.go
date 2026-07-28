@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
-	"github.com/QuantumNous/new-api/types"
+	hosttypes "github.com/QuantumNous/new-api/types"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
@@ -71,7 +72,7 @@ func codexRelayInfo(t *testing.T) *relaycommon.RelayInfo {
 		UserId:          42,
 		RequestId:       "req-1",
 		OriginModelName: "gpt-5.1-codex",
-		RelayFormat:     types.RelayFormatOpenAIResponses,
+		RelayFormat:     relaytypes.RelayFormatOpenAIResponses,
 		RequestHeaders: map[string]string{
 			"Originator": "Codex CLI",
 			"Session_id": "sess-abc",
@@ -125,8 +126,8 @@ func TestPromptCacheExpiryEligibilityNoOps(t *testing.T) {
 		name   string
 		mutate func(info *relaycommon.RelayInfo)
 	}{
-		{"non-responses format", func(info *relaycommon.RelayInfo) { info.RelayFormat = types.RelayFormatOpenAI }},
-		{"compaction format", func(info *relaycommon.RelayInfo) { info.RelayFormat = types.RelayFormatOpenAIResponsesCompaction }},
+		{"non-responses format", func(info *relaycommon.RelayInfo) { info.RelayFormat = relaytypes.RelayFormatOpenAI }},
+		{"compaction format", func(info *relaycommon.RelayInfo) { info.RelayFormat = relaytypes.RelayFormatOpenAIResponsesCompaction }},
 		{"channel test", func(info *relaycommon.RelayInfo) { info.IsChannelTest = true }},
 		{"prompt_cache_key alone is not codex", func(info *relaycommon.RelayInfo) {
 			info.RequestHeaders = map[string]string{"User-Agent": "some-sdk"}
@@ -590,11 +591,11 @@ func TestPromptCacheExpirySettlementContract(t *testing.T) {
 		usage.InputTokensDetails.CachedCreationTokens = 0
 	}
 	info.StartTime = time.Now()
-	info.PriceData = types.PriceData{
+	info.PriceData = hosttypes.PriceData{
 		ModelRatio:      1,
 		CompletionRatio: 2,
 		CacheRatio:      0.1,
-		GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		GroupRatioInfo:  hosttypes.GroupRatioInfo{GroupRatio: 1},
 	}
 	summary := calculateTextQuotaSummary(testGinContext(t), info, usage)
 	assert.Equal(t, 11000, summary.Quota, "owner cache reads must be charged as normal input")
@@ -612,10 +613,10 @@ func TestPromptCacheExpirySettlementContract(t *testing.T) {
 	// Fixed per-call pricing is usage-independent and therefore invariant.
 	fixedInfo := codexRelayInfo(t)
 	fixedInfo.StartTime = time.Now()
-	fixedInfo.PriceData = types.PriceData{
+	fixedInfo.PriceData = hosttypes.PriceData{
 		UsePrice:       true,
 		ModelPrice:     0.02,
-		GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: 1},
 	}
 	originalFixed := codexUsage()
 	adjustedFixed := *originalFixed

@@ -6,18 +6,17 @@
 
 ## Overview
 
-前端是 bun workspace(`web/`),包含两个主题:
+前端已扁平化为单一应用 `web/`:React 19 + TypeScript + Rsbuild +
+TanStack Router/Query/Table + Base UI + Tailwind + Zustand + i18next。旧的
+`web/default` 与 `web/classic` 目录已由上游移除,不得恢复。
 
-- `web/default/` — **主主题**,新功能一律写在这里。React 19 + TypeScript + Rsbuild + TanStack Router/Query/Table + Base UI + Tailwind + Zustand + i18next。
-- `web/classic/` — 旧主题,React 18 + Semi Design,JSX 无 TypeScript。仅维护,不作为新功能落点;确需同步 classic 时须任务中明确说明。
+行为类规范(i18n、表单、状态管理、错误处理等)以 `web/AGENTS.md` 为准,仓库根 `AGENTS.md` 的前端规则(bun 作包管理器、i18n 平铺 JSON 英文原文作 key)为硬性要求。本文只回答一个问题:**代码放哪里**。
 
-行为类规范(i18n、表单、状态管理、错误处理等)以 `web/default/AGENTS.md` 为准,仓库根 `AGENTS.md` 的前端规则(bun 作包管理器、i18n 平铺 JSON 英文原文作 key)为硬性要求。本文只回答一个问题:**代码放哪里**。
-
-常用命令(在 `web/default/` 下执行):`bun run dev` / `bun run build` / `bun run typecheck`(tsgo)/ `bun run lint`(oxlint)/ `bun run i18n:sync`。
+常用命令(在 `web/` 下执行):`bun run dev` / `bun run build` / `bun run typecheck`(tsgo)/ `bun run lint`(oxlint)/ `bun run i18n:sync`。
 
 ---
 
-## Directory Layout — `web/default/src/`
+## Directory Layout — `web/src/`
 
 ```
 src/
@@ -41,7 +40,7 @@ src/
 
 ## Feature Modules — `src/features/<feature>/`
 
-一个业务域一个目录(现有:keys、channels、users、dashboard、usage-logs、pricing、playground …)。标准布局以 `web/default/src/features/keys/`、`web/default/src/features/channels/` 为范例:
+一个业务域一个目录(现有:keys、channels、users、dashboard、usage-logs、pricing、playground …)。标准布局以 `web/src/features/keys/`、`web/src/features/channels/` 为范例:
 
 ```
 features/<feature>/
@@ -61,9 +60,9 @@ features/<feature>/
 
 ## API Calls
 
-- 全局唯一 axios 实例:`web/default/src/lib/api.ts` 导出 `api`(withCredentials、GET 并发去重、拦截器接 `handleServerError`)。
+- 全局唯一 axios 实例:`web/src/lib/api.ts` 导出 `api`(withCredentials、GET 并发去重、拦截器接 `handleServerError`)。
 - 新增接口调用 = 在对应 feature 的 `api.ts` 加导出函数,类型写进同目录 `types.ts`;组件里用 `@tanstack/react-query` 的 `useQuery`/`useMutation` 消费,`queryKey` 用数组形式(如 `['user-groups']`)。
-- 真实示例(`web/default/src/features/keys/api.ts`):
+- 真实示例(`web/src/features/keys/api.ts`):
 
 ```ts
 import { api } from '@/lib/api'
@@ -82,7 +81,7 @@ export async function getApiKeys(
 
 ## Routing — `src/routes/`
 
-TanStack Router 文件路由;`routeTree.gen.ts` 由 `@tanstack/router-plugin`(见 `web/default/rsbuild.config.ts` 中 `tanstackRouter`)在 dev/build 时自动生成。
+TanStack Router 文件路由;`routeTree.gen.ts` 由 `@tanstack/router-plugin`(见 `web/rsbuild.config.ts` 中 `tanstackRouter`)在 dev/build 时自动生成。
 
 实际目录组织:
 
@@ -100,7 +99,7 @@ routes/
 └── console/              # 旧路径重定向层(topup.tsx、log.tsx)
 ```
 
-路由文件只做三件事:`createFileRoute`、`validateSearch`(zod)、`component` 指向 feature 入口,**不写业务实现**。真实示例(`web/default/src/routes/_authenticated/keys/index.tsx`):
+路由文件只做三件事:`createFileRoute`、`validateSearch`(zod)、`component` 指向 feature 入口,**不写业务实现**。真实示例(`web/src/routes/_authenticated/keys/index.tsx`):
 
 ```ts
 export const Route = createFileRoute('/_authenticated/keys/')({
@@ -128,12 +127,6 @@ export const Route = createFileRoute('/_authenticated/keys/')({
 
 ---
 
-## web/classic
-
-旧主题,结构为传统分层:`src/pages/`(页面)、`src/components/`、`src/helpers/`(API 与工具)、`src/context(s)/`、`src/constants/`、`src/i18n/`。只做缺陷修复类维护,不在此新增功能;目录约定不适用本文上述 feature 规则。
-
----
-
 ## Forbidden Patterns
 
 - **禁止手改 `src/routeTree.gen.ts`** — 自动生成产物(knip 亦忽略),改路由只改 `src/routes/` 下文件。
@@ -141,7 +134,7 @@ export const Route = createFileRoute('/_authenticated/keys/')({
 - **禁止绕过 `src/lib/api.ts`** — 不得自建 axios 实例或裸 `fetch` 调后端;接口调用只落在 feature 的 `api.ts`。
 - **禁止硬编码用户可见文案** — 必须 `t('English key')` + 平铺 locale JSON(根 `AGENTS.md` 前端规则)。
 - **禁止用 npm/yarn/pnpm** — 前端一律 bun(根 `AGENTS.md`)。
-- **禁止直接操作 `window.location` 导航** — 用 `useNavigate` / `Link`(`web/default/AGENTS.md` 3.8)。
+- **禁止直接操作 `window.location` 导航** — 用 `useNavigate` / `Link`(`web/AGENTS.md` 3.8)。
 - **禁止在 `src/components/ui/` 掺入业务逻辑** — 该目录只放基础 UI 封装。
 - **禁止删除或改写 copyright header 及 new-api / QuantumNous 归属信息** — 根 `AGENTS.md` 项目治理保护条款。
 
@@ -150,5 +143,5 @@ export const Route = createFileRoute('/_authenticated/keys/')({
 ## References
 
 - 根 `/AGENTS.md` — 前端硬性规则(bun、i18n)、项目治理保护条款。
-- `web/default/AGENTS.md` — 详细行为规范(组件、状态、表单、路由行为、测试、构建)。
-- 范例模块:`web/default/src/features/keys/`、`web/default/src/features/channels/`。
+- `web/AGENTS.md` — 详细行为规范(组件、状态、表单、路由行为、测试、构建)。
+- 范例模块:`web/src/features/keys/`、`web/src/features/channels/`。

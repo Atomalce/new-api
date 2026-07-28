@@ -1,6 +1,6 @@
 package common
 
-import "github.com/QuantumNous/new-api/dto"
+import "github.com/QuantumNous/new-api/relaykit/dto"
 
 // PromptCacheExpiryDecision is the sticky per-request outcome of the Redis
 // cycle claim for the prompt-cache discount expiry policy.

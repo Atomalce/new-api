@@ -6,7 +6,7 @@
 
 ## Overview
 
-- 适用范围:仓库根的 Go 代码(`main.go`、`common/`、`model/`、`relay/`、`controller/`、`service/`、`middleware/`、`dto/`、`types/`、`constant/`、`setting/`、`router/`、`pkg/`)。前端规范见 `web/default/AGENTS.md`。
+- 适用范围:仓库根的 Go 代码(`main.go`、`common/`、`model/`、`relay/`、`controller/`、`service/`、`middleware/`、`constant/`、`setting/`、`router/`、`pkg/`)以及独立 `relaykit/` 模块。前端规范见 `web/AGENTS.md`。
 - 分层架构:Router → Controller → Service → Model;provider 适配器在 `relay/channel/<provider>/`,实现 `relay/channel/adapter.go` 的 `Adaptor` 接口。
 - **权威来源**:根目录 `AGENTS.md` 是上游硬性规范,本文与其一致并做落地引用;若有冲突,以 `AGENTS.md` 为准。
 - 数据库必须同时兼容 SQLite / MySQL ≥ 5.7.8 / PostgreSQL ≥ 9.6;Redis 可选。任何 DB 代码不得只在单一方言下正确。
@@ -20,7 +20,7 @@
 - 文件名:snake_case(如 `common/quota_math.go`、`constant/context_key.go`)。`common/`、`controller/` 里存量 kebab-case 文件(`rate-limit.go`、`channel-test.go`)是历史遗留,**新文件禁止 kebab-case**。
 - 平台差异文件用 build tag 拆分:`common/system_monitor_unix.go`(`//go:build !windows`)/ `system_monitor_windows.go`。这是仓库中仅有的 build tags。
 - Gin context key:统一在 `constant/context_key.go` 用类型化常量(`type ContextKey string`,如 `constant.ContextKeyTokenId`),不得散落字符串字面量。
-- Relay 错误:统一用 `*types.NewAPIError`(`types/error.go` 的 `NewError` / `NewErrorWithStatusCode`),`Adaptor.DoResponse` 签名已固定返回该类型。
+- Relay 错误:统一用 `*types.NewAPIError`(`relaykit/types/error.go` 的 `NewError` / `NewErrorWithStatusCode`),`Adaptor.DoResponse` 签名已固定返回该类型。
 - 日志:请求内用 `logger.LogInfo/LogWarn/LogError(ctx, ...)`(`logger/logger.go`,带请求关联);系统级/启动期用 `common.SysLog/SysError`(`common/sys_log.go`)。不要 `fmt.Println` / 裸 `log.Print`。
 - 函数组织(AGENTS.md Common Code Quality):优先 early return,少嵌套;禁止只有一个调用方、不表达稳定业务概念的包级 helper——直接内联;保留的单用途 helper 命名必须是领域概念而非机械步骤。
 
@@ -46,7 +46,7 @@
 
 - quota 换算集中在 `common/quota_math.go`,禁止任何本地转换或裸转型:浮点乘积用 `common.QuotaFromFloat`(截断),需四舍五入用 `common.QuotaRound`(half-away-from-zero),decimal 用 `common.QuotaFromDecimal`。饱和上限是 int32(quota 列为 32 位)。
 - 计费路径必须用 `*Checked` 变体(`QuotaFromFloatChecked` 等),发生 clamp 时把 `*common.QuotaClamp` 挂到 `relayInfo.QuotaClamp`,写日志前经 `attachQuotaSaturation`(`service/log_info_generate.go`)落到 `other.admin_info.quota_saturation`。
-- 一切成为计费乘数的用户可控量必须在校验层设上界并复用既有常量:`dto.MaxImageN`(`dto/openai_image.go`,=128)、`maxTokensLimit`(`relay/helper/valid_request.go`,`math.MaxInt32 / 2`)、`relaycommon.MaxTaskDurationSeconds`。`*uint` 字段仅 `>= 0` 检查不够,必须有上界(超大正数即回绕负数)。
+- 一切成为计费乘数的用户可控量必须在校验层设上界并复用既有常量:`dto.MaxImageN`(`relaykit/dto/openai_image.go`,=128)、`maxTokensLimit`(`relay/helper/valid_request.go`,`math.MaxInt32 / 2`)、`relaycommon.MaxTaskDurationSeconds`。`*uint` 字段仅 `>= 0` 检查不够,必须有上界(超大正数即回绕负数)。
 - 倍率写入只走 `types.PriceData.AddOtherRatio`(拒绝非正 / NaN / +Inf),禁止直写 `PriceData.OtherRatios`。
 - 新增计费路径要通读全链:validation → EstimateBilling/OtherRatios → quota 换算 → pre-consume → settle/refund,每步保持"永不产生负扣费"不变量。
 - 改分层/动态计费表达式前必读 `pkg/billingexpr/expr.md`。
@@ -56,7 +56,7 @@
 ### 1. Scope / Trigger
 
 - Trigger: any relay path that converts Chat Completions, Responses, Gemini, or another provider's usage shape before billing, logging, or returning a client response.
-- Purpose: billing and audit logic must consume a canonical `dto.Usage`; protocol-specific field projection is an output-boundary concern. Mixing the two can silently drop cache-token, media-token, reasoning-token, or provider-extension fields and undercharge a request.
+- Purpose: billing and audit logic must consume a canonical `relaykit/dto.Usage`; protocol-specific field projection is an output-boundary concern. Mixing the two can silently drop cache-token, media-token, reasoning-token, or provider-extension fields and undercharge a request.
 
 ### 2. Signatures
 
@@ -121,7 +121,7 @@ return out, &canonicalUsage, nil
 
 ### Relay Request DTOs
 
-- 解析自客户端、再序列化给上游的请求结构,可选标量字段必须"指针 + omitempty",保证显式零值透传、缺省字段省略。真实示例(`dto/openai_request.go:37`):
+- 解析自客户端、再序列化给上游的请求结构,可选标量字段必须"指针 + omitempty",保证显式零值透传、缺省字段省略。真实示例(`relaykit/dto/openai_request.go`):
 
 ```go
 MaxTokens *uint `json:"max_tokens,omitempty"`
@@ -151,23 +151,24 @@ MaxTokens *uint `json:"max_tokens,omitempty"`
 
 ## Lint & Commands
 
-- 仓库未配置 golangci-lint(无 `.golangci.yml`);CI(`.github/workflows/pr-check.yml`)只做 PR 元数据 / anti-slop 检查,**不跑 Go lint 与测试**,质量靠本地自查 + review。
+- 仓库未配置 golangci-lint(无 `.golangci.yml`);CI(`.github/workflows/ci.yml`)会对根模块和 RelayKit 分别执行 `go vet`,并通过 `make test` 跑两模块测试。
 - 本地基线(提交前跑):
 
 ```bash
 gofmt -l .          # 必须无输出
 go vet ./...
 go build ./...      # 发布构建等价于 Dockerfile: CGO_ENABLED=0 go build
+(cd relaykit && GOWORK=off go vet ./... && go build ./... && go test ./...)
 ```
 
 - 本地起后端:`make start-api`(`go run main.go`)或 `make dev-api`(docker compose)。
-- 前端(参考):lint 用 oxlint、typecheck 用 tsgo,在 `web/` workspace 内用 bun 执行,详见 `web/default/AGENTS.md`。
+- 前端(参考):lint 用 oxlint、typecheck 用 tsgo,在 `web/` workspace 内用 bun 执行,详见 `web/AGENTS.md`。
 
 ---
 
 ## Testing
 
-- 运行:仓库根 `go test ./...`。SQLite 驱动是纯 Go 的 `glebarez/sqlite`(底层 modernc),无需 CGO;除 `common/system_monitor_*.go` 的 `windows`/`!windows` 外**没有自定义 build tags**,任何平台直接跑,无需额外 tag 参数。
+- 运行:仓库根 `GOWORK=off make test`;该命令覆盖根模块与 RelayKit。需要单独验证 RelayKit 时进入 `relaykit/` 后执行 `GOWORK=off go test ./...`。SQLite 驱动是纯 Go 的 `glebarez/sqlite`(底层 modernc),无需 CGO。
 - 断言库:新增或大改的测试必须用 `github.com/stretchr/testify` —— `require` 做 fixture/致命断言,`assert` 做非致命值断言(见 `model/locking_test.go`)。
 - Fixture 惯例:
   - 需要 DB 的测试用内存 SQLite 显式初始化:`gorm.Open(sqlite.Open(":memory:"), ...)`(`model/task_cas_test.go`);
