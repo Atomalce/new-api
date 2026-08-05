@@ -21,10 +21,10 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// Codex /v1/responses prompt-cache discount expiry policy.
+// /v1/responses prompt-cache discount expiry policy.
 //
 // Every cycle (admin-configured length, default 60 seconds), the first
-// positively identified Codex request for the same logical cache lineage
+// billable Responses request for the same logical cache lineage
 // (request-body prompt_cache_key, falling back to the Session_id header)
 // becomes the cycle owner: its upstream-reported cache-read tokens are
 // reclassified as normal full-price input. Billing, consume logs, and the
@@ -40,9 +40,11 @@ import (
 // decision, task 07-11-prompt-cache-discount-expiry Q3).
 const (
 	promptCacheExpiryPolicyVersion = "v1"
-	promptCacheExpiryRuleName      = "codex_responses"
-	promptCacheExpiryIdentityType  = "codex_cache_lineage"
-	promptCacheExpiryClientPath    = "/v1/responses"
+	// Keep the v1 audit and identity identifiers stable so existing log queries
+	// and Redis cycles remain valid when the scope expands to all Responses.
+	promptCacheExpiryRuleName     = "codex_responses"
+	promptCacheExpiryIdentityType = "codex_cache_lineage"
+	promptCacheExpiryClientPath   = "/v1/responses"
 
 	promptCacheExpiryKeyPrefix   = "pce:" + promptCacheExpiryPolicyVersion + ":c:"
 	promptCacheExpirySentinelKey = "pce:" + promptCacheExpiryPolicyVersion + ":secret_fp"
@@ -66,7 +68,7 @@ var (
 // unhealthy Redis, or a secret-fingerprint mismatch fails startup.
 func InitPromptCacheDiscountExpiry() {
 	if !common.RedisEnabled {
-		common.SysLog("[prompt_cache_expiry] WARNING: Redis is not configured; the Codex /v1/responses prompt-cache discount expiry policy is INACTIVE (compatibility no-op). Configure Redis and a shared SESSION_SECRET/CRYPTO_SECRET on every node to activate it.")
+		common.SysLog("[prompt_cache_expiry] WARNING: Redis is not configured; the /v1/responses prompt-cache discount expiry policy is INACTIVE (compatibility no-op). Configure Redis and a shared SESSION_SECRET/CRYPTO_SECRET on every node to activate it.")
 		promptCacheExpiryActive = false
 		return
 	}
@@ -123,15 +125,7 @@ func resolvePromptCacheExpiryState(info *relaycommon.RelayInfo) *relaycommon.Pro
 		return st
 	}
 
-	// Positive Codex classification: an Originator header containing "codex"
-	// (e.g. "Codex CLI", "codex_cli_rs") or a non-empty Session_id header.
-	// A standard prompt_cache_key alone never opts a caller in.
-	originator := promptCacheExpiryHeader(info.RequestHeaders, "originator")
 	sessionId := promptCacheExpiryHeader(info.RequestHeaders, "session_id")
-	if !strings.Contains(strings.ToLower(originator), "codex") && sessionId == "" {
-		st.Ineligible = true
-		return st
-	}
 
 	// Cache-lineage identity: body prompt_cache_key wins over Session_id.
 	// Both normalize to one semantic identity type so switching sources with

@@ -129,10 +129,6 @@ func TestPromptCacheExpiryEligibilityNoOps(t *testing.T) {
 		{"non-responses format", func(info *relaycommon.RelayInfo) { info.RelayFormat = relaytypes.RelayFormatOpenAI }},
 		{"compaction format", func(info *relaycommon.RelayInfo) { info.RelayFormat = relaytypes.RelayFormatOpenAIResponsesCompaction }},
 		{"channel test", func(info *relaycommon.RelayInfo) { info.IsChannelTest = true }},
-		{"prompt_cache_key alone is not codex", func(info *relaycommon.RelayInfo) {
-			info.RequestHeaders = map[string]string{"User-Agent": "some-sdk"}
-		}},
-		{"no headers at all", func(info *relaycommon.RelayInfo) { info.RequestHeaders = nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -151,6 +147,27 @@ func TestPromptCacheExpiryEligibilityNoOps(t *testing.T) {
 			assert.Equal(t, 8000, usage.PromptTokensDetails.CachedTokens, "usage must stay unchanged")
 		})
 	}
+}
+
+func TestPromptCacheExpiryResponsesRequestDoesNotRequireCodexHeaders(t *testing.T) {
+	fake := &fakeCycleClaim{owned: true, owner: "req-1"}
+	setupPromptCacheExpiry(t, fake.claim)
+	info := codexRelayInfo(t)
+	info.OriginModelName = "gpt-5.5"
+	info.RequestHeaders = nil
+	info.Request = &dto.OpenAIResponsesRequest{
+		Model:          "gpt-5.5",
+		PromptCacheKey: json.RawMessage(`"lja-cache-lineage"`),
+	}
+	usage := codexUsage()
+
+	require.True(t, ApplyPromptCacheDiscountExpiry(testGinContext(t), info, usage, true))
+	require.NotNil(t, info.PromptCacheExpiry)
+	assert.False(t, info.PromptCacheExpiry.Ineligible)
+	assert.Equal(t, relaycommon.PromptCacheExpiryOwner, info.PromptCacheExpiry.Decision)
+	assert.Equal(t, "prompt_cache_key", info.PromptCacheExpiry.IdentitySource)
+	assert.Equal(t, 1, fake.calls)
+	assert.Equal(t, 0, usage.PromptTokensDetails.CachedTokens)
 }
 
 func TestPromptCacheExpiryInactivePolicyIsNoOp(t *testing.T) {
@@ -703,7 +720,7 @@ func TestPromptCacheExpiryAudit(t *testing.T) {
 		fake := &fakeCycleClaim{owned: true}
 		setupPromptCacheExpiry(t, fake.claim)
 		info := codexRelayInfo(t)
-		info.RequestHeaders = nil
+		info.RelayFormat = relaytypes.RelayFormatOpenAI
 		ApplyPromptCacheDiscountExpiry(testGinContext(t), info, codexUsage(), true)
 
 		other := map[string]interface{}{}
@@ -726,7 +743,7 @@ func TestPromptCacheExpiryAudit(t *testing.T) {
 		setupPromptCacheExpiry(t, fake2.claim)
 		info2 := codexRelayInfo(t)
 		info2.Request = &dto.OpenAIResponsesRequest{Model: "gpt-5.1-codex"}
-		info2.RequestHeaders = map[string]string{"Originator": "codex_cli_rs"}
+		info2.RequestHeaders = nil
 		ApplyPromptCacheDiscountExpiry(testGinContext(t), info2, codexUsage(), true)
 
 		other2 := map[string]interface{}{}

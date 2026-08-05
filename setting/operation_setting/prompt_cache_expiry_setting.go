@@ -9,7 +9,7 @@ const (
 	PromptCacheExpiryMaxCycleSeconds = 86400
 )
 
-// PromptCacheExpirySetting controls the Codex /v1/responses prompt-cache
+// PromptCacheExpirySetting controls the /v1/responses prompt-cache
 // discount expiry billing policy (service/prompt_cache_expiry.go): the
 // operator switch and the cycle length used as the Redis claim TTL.
 type PromptCacheExpirySetting struct {

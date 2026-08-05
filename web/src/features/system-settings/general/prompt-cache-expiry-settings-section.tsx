@@ -127,11 +127,11 @@ export function PromptCacheExpirySettingsSection({
               <SettingsSwitchItem>
                 <SettingsSwitchContent>
                   <FormLabel>
-                    {t('Enable Codex prompt cache expiry billing')}
+                    {t('Enable Responses prompt cache expiry billing')}
                   </FormLabel>
                   <FormDescription>
                     {t(
-                      'Each cycle, the first Codex /v1/responses request of the same cache lineage is billed with its cached input at the full input price, and the usage returned to the client is adjusted to match. Requires Redis and a shared SESSION_SECRET/CRYPTO_SECRET on every node; otherwise the policy stays inactive even when enabled.'
+                      'Each cycle, the first /v1/responses request of the same cache lineage is billed with its cached input at the full input price, and the usage returned to the client is adjusted to match. Requires Redis and a shared SESSION_SECRET/CRYPTO_SECRET on every node; otherwise the policy stays inactive even when enabled.'
                     )}
                   </FormDescription>
                 </SettingsSwitchContent>

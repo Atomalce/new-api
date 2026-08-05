@@ -339,7 +339,7 @@ func InitResources() error {
 		return err
 	}
 
-	// Codex /v1/responses prompt-cache discount expiry policy (no-op without Redis)
+	// /v1/responses prompt-cache discount expiry policy (no-op without Redis)
 	service.InitPromptCacheDiscountExpiry()
 
 	perfmetrics.Init()
