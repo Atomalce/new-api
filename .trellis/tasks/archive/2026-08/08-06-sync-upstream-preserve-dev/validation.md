@@ -2,6 +2,8 @@
 
 ## Git and preservation
 
+- 工作记录提交为 `5e1b5255120eb1d9aec40193b3732f0e787e9b29`，其父提交为
+  原 `dev` tip `87ccf5f9edecbaa47e20ab036e6e412504927484`。
 - `main`、`origin/main`、`upstream/main` 均为
   `0ab02020603d22e5613bc4cf46bfab06f8567769`；`main` 通过 `--ff-only` 更新并已推送。
 - `dev` 已通过既有合并提交 `12237e5e` 包含固定上游目标，因此未创建重复 merge。
