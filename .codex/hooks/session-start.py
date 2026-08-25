@@ -92,10 +92,16 @@ def _normalize_windows_shell_path(path_str: str) -> str:
 warnings.filterwarnings("ignore")
 
 FIRST_REPLY_NOTICE = """<first-reply-notice>
-On the first visible assistant reply in this session, begin with exactly one short Chinese sentence:
-Trellis SessionStart 已注入：workflow、当前任务状态、开发者身份、git 状态、active tasks、spec 索引已加载。
-Then continue directly with the user's request. This notice is one-shot: do not repeat it after the first assistant reply in the same session.
+On the first visible assistant reply in this session, briefly acknowledge that Trellis SessionStart context loaded.
+Choose the acknowledgment language in this order:
+1. Use the language of the user's current request (the user message that triggered this reply).
+2. If that request has no clear natural language, use an explicitly established project communication language.
+3. If neither provides a language, output the language-neutral fallback exactly: `Trellis SessionStart ✓`.
+Continue directly with the user's request after the acknowledgment.
+The acknowledgment must not alter the language used for the remainder of the response.
+This notice is one-shot: do not repeat it after the first visible assistant reply in this session.
 </first-reply-notice>"""
+
 
 def should_skip_injection() -> bool:
     if os.environ.get("TRELLIS_HOOKS") == "0":
@@ -446,6 +452,25 @@ def _strip_breadcrumb_tag_blocks(content: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", stripped).strip()
 
 
+def _resolve_workflow_md(root: Path, input_data: dict) -> Path:
+    """Resolve the active task's workflow file, falling back to the global one.
+
+    The per-task resolution rule lives in common.workflow_selection inside
+    .trellis/scripts. Older installed projects may not ship that module, and
+    hooks must never crash the session — ANY failure (import error, old
+    scripts tree, resolver bug) falls back to the global workflow.md.
+    """
+    try:
+        scripts_dir = root / ".trellis" / "scripts"
+        if str(scripts_dir) not in sys.path:
+            sys.path.insert(0, str(scripts_dir))
+        from common.workflow_selection import resolve_workflow_md  # type: ignore[import-not-found]
+
+        return resolve_workflow_md(root, input_data, platform="codex")
+    except Exception:
+        return root / ".trellis" / "workflow.md"
+
+
 def _build_workflow_toc(workflow_path: Path) -> str:
     """Inject only the compact Phase Index summary for SessionStart."""
     content = read_file(workflow_path)
@@ -499,7 +524,7 @@ Trellis compact SessionStart context. Use it to orient the session; load details
     output.write("\n</current-state>\n\n")
 
     output.write("<trellis-workflow>\n")
-    output.write(_build_workflow_toc(trellis_dir / "workflow.md"))
+    output.write(_build_workflow_toc(_resolve_workflow_md(project_dir, hook_input)))
     output.write("\n</trellis-workflow>\n\n")
 
     output.write("<guidelines>\n")
