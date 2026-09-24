@@ -72,3 +72,37 @@ Merged the latest fixed upstream target into dev, preserved the Codex prompt-cac
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: 同步 upstream/main 到 dev
+
+**Date**: 2026-09-24
+**Task**: 同步 upstream/main 到 dev
+**Branch**: `dev`
+
+### Summary
+
+将 upstream/main 固定目标 6c14c0762 合入 dev，解决 11 个冲突，保留 Responses prompt-cache expiry 和上游协议/计费功能；Go、RelayKit、前端测试/类型/构建通过，推送 origin/dev。
+
+### Main Changes
+
+- 合并提交 849e805bb 已推送，保留原 dev 历史与 9 个用户修改。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `849e805bb` | (see git log) |
+
+### Testing
+
+- [OK] Go 全量测试、go vet、RelayKit 独立 build/test 通过。
+- [OK] 前端 Vitest 166 文件/2096 测试、typecheck、build 通过。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 继续处理其余 3 个现存 Trellis active tasks。
