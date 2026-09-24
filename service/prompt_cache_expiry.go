@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
@@ -502,12 +503,31 @@ func PatchResponsesStreamUsageCachedTokens(data string) string {
 // log's other.admin_info so it stays admin-only (non-admin log views strip
 // admin_info). Raw identity values never appear; only a digest prefix does.
 func attachPromptCacheExpiryAudit(relayInfo *relaycommon.RelayInfo, other map[string]interface{}) {
-	if relayInfo == nil || other == nil || relayInfo.PromptCacheExpiry == nil {
+	audit := promptCacheExpiryAudit(relayInfo)
+	if audit == nil || other == nil {
 		return
+	}
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	if !ok {
+		adminInfo = make(map[string]interface{})
+		other["admin_info"] = adminInfo
+	}
+	adminInfo["prompt_cache_discount_expiry"] = audit
+}
+
+func attachPromptCacheExpiryAuditToLogOther(relayInfo *relaycommon.RelayInfo, other *model.LogOther) {
+	if audit := promptCacheExpiryAudit(relayInfo); audit != nil && other != nil {
+		other.SetAdmin("prompt_cache_discount_expiry", audit)
+	}
+}
+
+func promptCacheExpiryAudit(relayInfo *relaycommon.RelayInfo) map[string]interface{} {
+	if relayInfo == nil || relayInfo.PromptCacheExpiry == nil {
+		return nil
 	}
 	st := relayInfo.PromptCacheExpiry
 	if st.Ineligible {
-		return
+		return nil
 	}
 	ttlSeconds := st.ClaimTTLSeconds
 	if ttlSeconds <= 0 {
@@ -549,12 +569,7 @@ func attachPromptCacheExpiryAudit(relayInfo *relaycommon.RelayInfo, other map[st
 		// (e.g. missing usage): record that the policy stayed pending.
 		audit["reason"] = "no_claim_point"
 	}
-	adminInfo, ok := other["admin_info"].(map[string]interface{})
-	if !ok {
-		adminInfo = make(map[string]interface{})
-		other["admin_info"] = adminInfo
-	}
-	adminInfo["prompt_cache_discount_expiry"] = audit
+	return audit
 }
 
 func promptCacheExpiryInputTotal(usage *dto.Usage) int {

@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
@@ -31,10 +32,13 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	if err := common.Unmarshal(responseBody, &geminiResponse); err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
+	info.ObserveResponseModel(gjson.GetBytes(responseBody, "modelVersion").Str)
 	markGeminiGoogleSearchCall(c, &geminiResponse)
+	countGeminiBillableFunctionCalls(info, &geminiResponse)
 	if len(geminiResponse.Candidates) == 0 {
 		usage := buildUsageFromGeminiResponse(c, info, &geminiResponse)
 		if geminiResponse.PromptFeedback != nil && geminiResponse.PromptFeedback.BlockReason != nil {
+			info.PerformanceBusinessRejection = true
 			common.SetContextKey(c, constant.ContextKeyAdminRejectReason, fmt.Sprintf("gemini_block_reason=%s", *geminiResponse.PromptFeedback.BlockReason))
 			return &usage, types.NewOpenAIError(
 				errors.New("request blocked by Gemini API: "+*geminiResponse.PromptFeedback.BlockReason),
@@ -50,15 +54,9 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 		)
 	}
 
-	chatResp := responseGeminiChat2OpenAI(c, &geminiResponse)
-	chatResp.Model = info.UpstreamModelName
-	if responseID := helper.GetResponseID(c); responseID != "" {
-		chatResp.Id = responseID
-	}
 	usage := buildUsageFromGeminiResponse(c, info, &geminiResponse)
-	chatResp.Usage = usage
 
-	convertResult, err := relayconvert.ConvertResponse(c, info, types.RelayFormatOpenAIResponses, chatResp)
+	convertResult, err := service.ConvertResponse(c, info, types.RelayFormatOpenAIResponses, &geminiResponse)
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
@@ -66,18 +64,14 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 	if !ok {
 		return nil, types.NewOpenAIError(fmt.Errorf("expected OpenAI responses response, got %T", convertResult.Value), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	responsesUsage := convertResult.Usage
-	if responsesUsage == nil || responsesUsage.TotalTokens == 0 {
-		responsesResp.Usage = relayconvert.UsageFromChatUsage(&usage)
+	if responseID := helper.GetResponseID(c); responseID != "" {
+		responsesResp.ID = responseID
 	}
-
-	// Only real upstream usageMetadata may claim a prompt-cache expiry cycle;
-	// buildUsageFromGeminiResponse falls back to estimates otherwise.
+	responsesResp.Model = info.UpstreamModelName
+	responsesResp.Usage = relayconvert.UsageFromChatUsage(&usage)
 	claimEligible := dto.HasGeminiUsageMetadataTokens(geminiResponse.GetUsageMetadata()) &&
 		service.ResponsesStatusCompleted(responsesResp.Status)
 	if service.ApplyPromptCacheDiscountExpiry(c, info, &usage, claimEligible) {
-		// mirror the owner adjustment onto the projected copy embedded in the
-		// client payload (the claim is already decided; this only re-zeroes)
 		service.ApplyPromptCacheDiscountExpiry(c, info, responsesResp.Usage, false)
 	}
 
@@ -92,19 +86,18 @@ func GeminiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *h
 func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	responseID := helper.GetResponseID(c)
 	created := common.GetTimestamp()
-	state, err := relayconvert.NewResponseStreamState(types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses, relayconvert.ResponseStreamOptions{
-		ID:      responseID,
-		Model:   info.UpstreamModelName,
-		Created: created,
+	state, err := relayconvert.NewResponseStreamState(types.RelayFormatGemini, types.RelayFormatOpenAIResponses, relayconvert.ResponseStreamOptions{
+		ID:                 responseID,
+		Model:              info.UpstreamModelName,
+		Created:            created,
+		EmitSequenceNumber: true,
 	})
 	if err != nil {
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
-	finishReason := constant.FinishReasonStop
-	toolCallIndexByChoice := make(map[int]map[string]int)
-	nextToolCallIndexByChoice := make(map[int]int)
+	hostedBridge := relayconvert.NewGeminiHostedStreamBridge()
 	var streamErr *types.NewAPIError
-	sawTerminalFinishReason := false
+	var realUpstreamUsage *dto.Usage
 
 	sendEvent := func(event relayconvert.ChatToResponsesStreamEvent) bool {
 		data, err := common.Marshal(event.Payload)
@@ -112,12 +105,37 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 			streamErr = types.NewOpenAIError(err, types.ErrorCodeJsonMarshalFailed, http.StatusInternalServerError)
 			return false
 		}
-		helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: event.Type}, string(data))
+		if err := helper.ResponseChunkData(c, dto.ResponsesStreamResponse{Type: event.Type}, string(data)); err != nil {
+			if info.StreamStatus != nil {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, err)
+			}
+			return false
+		}
 		return true
 	}
-	sendChunk := func(chunk *dto.ChatCompletionsStreamResponse) bool {
-		results, err := relayconvert.ConvertStreamResponseChunk(c, info, state, chunk)
+	failResponsesStream := func(err error) bool {
+		failureResults, handled := state.FailResponsesStream("server_error", err.Error(), "")
+		if !handled {
+			return false
+		}
+		for _, result := range failureResults {
+			event, ok := result.Value.(relayconvert.ChatToResponsesStreamEvent)
+			if !ok {
+				streamErr = types.NewOpenAIError(fmt.Errorf("expected OAI responses stream event, got %T", result.Value), types.ErrorCodeBadResponse, http.StatusInternalServerError)
+				return true
+			}
+			if !sendEvent(event) {
+				return true
+			}
+		}
+		return true
+	}
+	sendChunk := func(chunk *dto.GeminiChatResponse) bool {
+		results, err := service.ConvertStreamResponseChunk(c, info, state, chunk)
 		if err != nil {
+			if failResponsesStream(err) {
+				return false
+			}
 			streamErr = types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 			return false
 		}
@@ -134,78 +152,57 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 		return true
 	}
 
-	// capture the last real upstream usage so estimated fallbacks can be told
-	// apart at the claim point below
-	var realUpstreamUsage *dto.Usage
-	usage, streamAPIError := geminiStreamHandler(c, info, resp, func(data string, geminiResponse *dto.GeminiChatResponse) bool {
+	usage, streamAPIError := geminiStreamHandler(c, info, resp, func(_ string, geminiResponse *dto.GeminiChatResponse) bool {
 		if metadata := geminiResponse.GetUsageMetadata(); dto.HasGeminiUsageMetadataTokens(metadata) {
 			mapped := buildUsageFromGeminiMetadata(metadata, info.GetEstimatePromptTokens())
 			realUpstreamUsage = &mapped
 		}
-		response, isStop := streamResponseGeminiChat2OpenAI(geminiResponse)
-		if isStop || response.IsFinished() {
-			sawTerminalFinishReason = true
-		}
-		response.Id = responseID
-		response.Created = created
-		response.Model = info.UpstreamModelName
-
-		if response.IsToolCall() {
-			finishReason = constant.FinishReasonToolCalls
-		}
-		for choiceIdx := range response.Choices {
-			choiceKey := response.Choices[choiceIdx].Index
-			for toolIdx := range response.Choices[choiceIdx].Delta.ToolCalls {
-				tool := &response.Choices[choiceIdx].Delta.ToolCalls[toolIdx]
-				if tool.ID == "" {
-					continue
-				}
-				indexByID := toolCallIndexByChoice[choiceKey]
-				if indexByID == nil {
-					indexByID = make(map[string]int)
-					toolCallIndexByChoice[choiceKey] = indexByID
-				}
-				if idx, ok := indexByID[tool.ID]; ok {
-					tool.SetIndex(idx)
-					continue
-				}
-				idx := nextToolCallIndexByChoice[choiceKey]
-				nextToolCallIndexByChoice[choiceKey] = idx + 1
-				indexByID[tool.ID] = idx
-				tool.SetIndex(idx)
-			}
-		}
-
-		if !sendChunk(response) {
-			return false
-		}
-		if isStop {
-			return sendChunk(helper.GenerateStopResponse(responseID, created, info.UpstreamModelName, finishReason))
-		}
-		return true
+		hostedBridge.Observe(geminiResponse)
+		return sendChunk(geminiResponse)
 	})
 	if streamAPIError != nil {
+		if failResponsesStream(streamAPIError) && streamErr == nil {
+			return usage, nil
+		}
 		return usage, streamAPIError
+	}
+	if info.StreamStatus != nil && !info.StreamStatus.IsNormalEnd() {
+		if info.StreamStatus.EndReason != relaycommon.StreamEndReasonClientGone {
+			failResponsesStream(fmt.Errorf("gemini stream ended unexpectedly: %s", info.StreamStatus.Summary()))
+		}
+		return usage, nil
 	}
 	if streamErr != nil {
 		return nil, streamErr
+	}
+	hostedEvents, err := hostedBridge.Finalize(state)
+	if err != nil {
+		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+	}
+	for _, event := range hostedEvents {
+		if !sendEvent(event) {
+			if streamErr != nil {
+				return usage, streamErr
+			}
+			return usage, nil
+		}
 	}
 
 	if usage != nil {
 		state.SetUsage(usage)
 	}
-	finalResults, err := relayconvert.FinalizeStreamResponse(c, info, state)
+	finalResults, err := service.FinalizeStreamResponse(c, info, state)
 	if err != nil {
+		if failResponsesStream(err) {
+			return usage, streamErr
+		}
 		return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
 	}
-	// Claim only when the settled usage is the untouched real upstream
-	// usageMetadata (geminiStreamHandler may replace it with estimates) and
-	// the terminal event is response.completed.
-	claimEligible := usage != nil && realUpstreamUsage != nil && sawTerminalFinishReason &&
+	claimEligible := usage != nil && realUpstreamUsage != nil && info.StreamStatus != nil &&
+		info.StreamStatus.ResponseOutcome() == string(relaycommon.ResponseOutcomeCompleted) && len(finalResults) > 0 &&
 		usage.PromptTokens == realUpstreamUsage.PromptTokens &&
 		usage.CompletionTokens == realUpstreamUsage.CompletionTokens &&
-		usage.TotalTokens == realUpstreamUsage.TotalTokens &&
-		len(finalResults) > 0
+		usage.TotalTokens == realUpstreamUsage.TotalTokens
 	if claimEligible {
 		lastEvent, ok := finalResults[len(finalResults)-1].Value.(relayconvert.ChatToResponsesStreamEvent)
 		claimEligible = ok && lastEvent.Type == "response.completed"
@@ -213,13 +210,11 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 	if service.ApplyPromptCacheDiscountExpiry(c, info, usage, claimEligible) {
 		for i := range finalResults {
 			event, ok := finalResults[i].Value.(relayconvert.ChatToResponsesStreamEvent)
-			if !ok {
+			if !ok || event.Payload.Response == nil || event.Payload.Response.Usage == nil {
 				continue
 			}
-			if event.Payload.Response != nil && event.Payload.Response.Usage != nil {
-				service.ApplyPromptCacheDiscountExpiry(c, info, event.Payload.Response.Usage, false)
-				finalResults[i].Value = event
-			}
+			service.ApplyPromptCacheDiscountExpiry(c, info, event.Payload.Response.Usage, false)
+			finalResults[i].Value = event
 		}
 	}
 	for _, result := range finalResults {
@@ -228,7 +223,10 @@ func GeminiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, r
 			return nil, types.NewOpenAIError(fmt.Errorf("expected OAI responses stream event, got %T", result.Value), types.ErrorCodeBadResponse, http.StatusInternalServerError)
 		}
 		if !sendEvent(event) {
-			return nil, streamErr
+			if streamErr != nil {
+				return usage, streamErr
+			}
+			return usage, nil
 		}
 	}
 	return usage, nil

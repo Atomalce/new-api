@@ -1,0 +1,3 @@
+{"file":".trellis/spec/guides/fork-maintenance.md","reason":"Use the fork synchronization validation and conflict playbook during final review."}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Check backend and billing invariants in merged relay code."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Check frontend locale and build/type safety requirements."}

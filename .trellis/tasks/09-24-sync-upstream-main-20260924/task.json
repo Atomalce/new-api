@@ -1,0 +1,30 @@
+{
+  "id": "sync-upstream-main-20260924",
+  "name": "sync-upstream-main-20260924",
+  "title": "Merge upstream main into dev",
+  "description": "Merge upstream/main at 6c14c0762 into dev, preserve fork commits, validate, commit, and push origin/dev.",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "yls",
+  "assignee": "yls",
+  "createdAt": "2026-09-24",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "dev",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "upstream_target": "6c14c0762",
+    "remote": "origin",
+    "branch": "dev"
+  }
+}
