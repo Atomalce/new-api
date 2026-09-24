@@ -15,11 +15,11 @@ Merge the frozen `upstream/main` target `6c14c0762` into `dev`, preserve all for
 
 ## Acceptance Criteria
 
-- [ ] `6c14c0762` is an ancestor of `dev`, and all pre-merge `dev`-only commits remain ancestors.
+- [x] `6c14c0762` is an ancestor of `dev`, and all pre-merge `dev`-only commits remain ancestors.
 - [x] The merge has no unresolved conflict markers, and `git diff --check` passes.
 - [x] Backend, RelayKit, frontend type/build/test checks and focused prompt-cache billing checks pass.
-- [ ] A merge commit is created and pushed to `origin/dev`; local and remote `dev` point to the same commit.
-- [ ] The nine pre-existing uncommitted Trellis changes are restored and remain outside the merge commit.
+- [x] Merge commit `849e805bbaa8b618166537620e94177eadc75809` is pushed to `origin/dev`; local and remote `dev` point to the same commit.
+- [x] The nine pre-existing uncommitted Trellis changes are restored and remain outside the merge commit.
 - [ ] No production service, database, Redis instance, or real upstream provider is contacted.
 
 ## Notes
@@ -39,3 +39,5 @@ Merge the frozen `upstream/main` target `6c14c0762` into `dev`, preserve all for
 - Conflict-marker scan, `git diff --cached --check`, and JSON parsing for all seven frontend locales passed.
 - Gemini prompt-cache stream regression, including abnormal EOF, passed; service prompt-cache and Responses usage tests passed.
 - `format:check` and `copyright:check` report upstream frontend files outside the conflict-resolution edits. No repository-wide rewrite was performed.
+- Push verification: `origin/dev` and local `HEAD` both equal `849e805bbaa8b618166537620e94177eadc75809`.
+- Stash restoration returned exactly the nine original modified paths; no merge or task commit includes them.
