@@ -449,3 +449,34 @@ func TestOaiChatToResponsesStreamHandlerAbnormalEOFWithUsageNeverClaims(t *testi
 		"an abnormal EOF without finish_reason must not open a cycle")
 	assert.Contains(t, recorder.Body.String(), `"cached_tokens":8000`)
 }
+
+func TestOaiChatToResponsesStreamHandlerUsageWithoutTotalStillChargesUpstreamFailure(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 30
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	// upstream reports usage without total_tokens and then fails before any
+	// output: upstream usage exists, so the request is settled (with the
+	// fork's local estimate for usage lacking total_tokens) instead of free
+	body := strings.Join([]string{
+		`data: {"id":"chat_1","object":"chat.completion.chunk","model":"gpt-5.1-codex","choices":[{"index":0,"delta":{"role":"assistant"}}]}`,
+		`data: {"id":"chat_1","object":"chat.completion.chunk","model":"gpt-5.1-codex","choices":[],"usage":{"prompt_tokens":10000,"completion_tokens":0,"prompt_tokens_details":{"cached_tokens":8000}}}`,
+		`data: {"error":{"message":"upstream overloaded","type":"server_error"}}`,
+		``,
+	}, "\n")
+	c, recorder, resp, info := newResponsesChatTestContext(t, body, true)
+	info.RelayFormat = types.RelayFormatOpenAIResponses
+	info.SetEstimatePromptTokens(9000)
+	info.PromptCacheExpiry = &relaycommon.PromptCacheExpiryState{
+		Decision:       relaycommon.PromptCacheExpiryPending,
+		IdentityDigest: "test-digest-000000000000",
+	}
+
+	usage, apiErr := OaiChatToResponsesStreamHandler(c, info, resp)
+	require.Nil(t, apiErr)
+	require.NotNil(t, usage)
+	assert.Positive(t, usage.PromptTokens)
+	got := recorder.Body.String()
+	assert.Contains(t, got, "response.failed")
+	assert.NotContains(t, got, "response.completed")
+}
