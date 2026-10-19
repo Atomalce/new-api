@@ -49,16 +49,7 @@ func OaiChatToResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	if !ok {
 		return nil, types.NewOpenAIError(fmt.Errorf("expected OpenAI responses response, got %T", convertResult.Value), types.ErrorCodeBadResponseBody, http.StatusInternalServerError)
 	}
-	canonicalUsage := chatResp.Usage
-	if chatResp.Usage.InputTokensDetails != nil {
-		details := *chatResp.Usage.InputTokensDetails
-		canonicalUsage.InputTokensDetails = &details
-	}
-	canonicalUsage.BillingUsage = dto.CloneBillingUsage(chatResp.Usage.BillingUsage)
-	if canonicalUsage.BillingUsage == nil {
-		canonicalUsage.BillingUsage = dto.NewOpenAIChatBillingUsage(&chatResp.Usage)
-	}
-	usage := &canonicalUsage
+	usage := upstreamChatUsageSnapshot(&chatResp.Usage)
 	if usage == nil || usage.TotalTokens == 0 {
 		// locally estimated usage never claims a prompt-cache expiry cycle
 		text := service.ExtractOutputTextFromResponses(responsesResp)
@@ -176,18 +167,16 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 			stopStream(sr, streamErr)
 			return
 		}
-		if chunk.Usage != nil && chunk.Usage.TotalTokens != 0 {
+		if chunk.Usage != nil {
 			applyUsagePostProcessing(info, chunk.Usage, common.StringToByteSlice(data))
-			canonicalUsage := *chunk.Usage
-			if chunk.Usage.InputTokensDetails != nil {
-				details := *chunk.Usage.InputTokensDetails
-				canonicalUsage.InputTokensDetails = &details
+			if snapshot := upstreamChatUsageSnapshot(chunk.Usage); snapshot != nil {
+				if upstreamUsage == nil {
+					upstreamUsage = snapshot
+				} else {
+					// usage may be split across chunks; keep every non-zero field
+					upstreamUsage = dto.MergeUsageNonZero(upstreamUsage, snapshot)
+				}
 			}
-			canonicalUsage.BillingUsage = dto.CloneBillingUsage(chunk.Usage.BillingUsage)
-			if canonicalUsage.BillingUsage == nil {
-				canonicalUsage.BillingUsage = dto.NewOpenAIChatBillingUsage(chunk.Usage)
-			}
-			upstreamUsage = &canonicalUsage
 		}
 		if chunk.IsFinished() {
 			sawTerminalFinishReason = true
@@ -235,6 +224,12 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 		// locally estimated usage never claims a prompt-cache expiry cycle
 		usage = service.ResponseText2Usage(c, state.UsageText(), info.UpstreamModelName, info.GetEstimatePromptTokens())
 		state.SetUsage(usage)
+	} else {
+		// response.completed reports the settled usage, including counts
+		// merged from several chunks; a copy keeps the stream state from
+		// rewriting the settled usage
+		visibleUsage := *usage
+		state.SetUsage(&visibleUsage)
 	}
 	if info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
 		return usage, nil
@@ -278,6 +273,32 @@ func OaiChatToResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo
 	}
 
 	return usage, nil
+}
+
+// upstreamChatUsageSnapshot copies the usage an upstream Chat Completions
+// response reported, or returns nil when it carries no token counts at all.
+// Like the Responses conversion, a missing total_tokens is rebuilt from the
+// prompt and completion counts, so such usage is billed as reported rather
+// than replaced by a local estimate. A snapshot whose total is still zero
+// (for example cache counts only) is kept for stream merging but is not real
+// usage on its own.
+func upstreamChatUsageSnapshot(src *dto.Usage) *dto.Usage {
+	if !dto.HasOpenAIUsageTokens(src) {
+		return nil
+	}
+	snapshot := *src
+	if snapshot.TotalTokens == 0 {
+		snapshot.TotalTokens = snapshot.PromptTokens + snapshot.CompletionTokens
+	}
+	if src.InputTokensDetails != nil {
+		details := *src.InputTokensDetails
+		snapshot.InputTokensDetails = &details
+	}
+	snapshot.BillingUsage = dto.CloneBillingUsage(src.BillingUsage)
+	if snapshot.BillingUsage == nil {
+		snapshot.BillingUsage = dto.NewOpenAIChatBillingUsage(&snapshot)
+	}
+	return &snapshot
 }
 
 // stopStream ends a converted stream from the scanner callback. A nil
