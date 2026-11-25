@@ -83,8 +83,8 @@ require (
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/yuin/gopher-lua v1.1.1 // indirect
-	go.opentelemetry.io/otel v1.41.0 // indirect
-	go.opentelemetry.io/otel/trace v1.41.0 // indirect
+	go.opentelemetry.io/otel v1.47.0 // indirect
+	go.opentelemetry.io/otel/trace v1.47.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 )
 
@@ -168,7 +168,7 @@ require (
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.46.0
-	github.com/MoeForge/moego v0.1.0-alpha.4
+	github.com/MoeForge/moego v0.1.0-alpha.5
 	github.com/MoeForge/moejs v0.1.0
 	github.com/QuantumNous/new-api/relaykit v0.0.0
 	github.com/QuantumNous/new-api/tokenkit v0.0.0
