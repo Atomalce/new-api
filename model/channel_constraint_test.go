@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -252,4 +253,40 @@ func TestTaskPluginChannelResponsesWebSocket(t *testing.T) {
 	assert.False(t, ok, "a converted route cannot forward native events")
 	ok, _ = ChannelSatisfiesFilters(channel("ws-missing", true), "m1", filters)
 	assert.False(t, ok)
+}
+
+func TestGetRandomSatisfiedChannelExcludesChannelsWithoutSkippingTiers(t *testing.T) {
+	useScheduledChannelDatabase(t)
+	const modelName = "exclude-channels-model"
+	weight := uint(100)
+	for _, seed := range []struct {
+		id       int
+		priority int64
+	}{{910001, 10}, {910002, 5}, {910003, 0}} {
+		priority := seed.priority
+		require.NoError(t, DB.Create(&Channel{
+			Id: seed.id, Type: constant.ChannelTypeOpenAI, Key: "test-only", Status: common.ChannelStatusEnabled,
+			Name: modelName, Models: modelName, Group: "default", Priority: &priority, Weight: &weight,
+		}).Error)
+		require.NoError(t, DB.Create(&Ability{
+			Group: "default", Model: modelName, ChannelId: seed.id, Enabled: true, Priority: &priority, Weight: weight,
+		}).Error)
+	}
+	for _, memoryCache := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cache=%v", memoryCache), func(t *testing.T) {
+			common.MemoryCacheEnabled = memoryCache
+			InitChannelCache()
+
+			excludeTop := []dto.ChannelFilter{{Kind: dto.FilterExcludeChannels, ExcludedChannelIDs: []int{910001}}}
+			channel, err := GetRandomSatisfiedChannel("default", modelName, 0, excludeTop)
+			require.NoError(t, err)
+			require.NotNil(t, channel)
+			assert.Equal(t, 910002, channel.Id, "the highest remaining tier is chosen")
+
+			excludeAll := []dto.ChannelFilter{{Kind: dto.FilterExcludeChannels, ExcludedChannelIDs: []int{910001, 910002, 910003}}}
+			channel, err = GetRandomSatisfiedChannel("default", modelName, 0, excludeAll)
+			require.NoError(t, err)
+			assert.Nil(t, channel)
+		})
+	}
 }

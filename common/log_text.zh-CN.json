@@ -869,5 +869,7 @@
   "zhipu_image_missing_url": "智谱图片接口没有返回 URL",
   "¥%.6f quota": "¥%.6f 额度",
   "＄%.6f quota": "＄%.6f 额度",
-  "plugin scheduled failed: plugin=%s channel_id=%d key_index=%d category=%s": "插件定时任务失败：plugin=%s channel_id=%d key_index=%d category=%s"
+  "plugin scheduled failed: plugin=%s channel_id=%d key_index=%d category=%s": "插件定时任务失败：plugin=%s channel_id=%d key_index=%d category=%s",
+  "channel circuit closed: channel #%d recovered": "渠道熔断已解除：渠道 #%d 已恢复",
+  "channel circuit opened: channel #%d is passed over for %s after %d consecutive failures": "渠道熔断已触发：渠道 #%d 在 %s 内暂不分配（连续失败 %d 次）"
 }

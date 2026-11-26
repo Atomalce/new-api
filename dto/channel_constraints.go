@@ -36,6 +36,10 @@ type ChannelPin struct {
 type ChannelFilterKind string
 
 const (
+	// FilterExcludeChannels drops the listed channel ids. Retries use it to try
+	// channels the request has not failed on, and channels whose circuit is
+	// open, before anything else.
+	FilterExcludeChannels    ChannelFilterKind = "exclude_channels"
 	FilterRequestPath        ChannelFilterKind = "request_path"
 	FilterTaskPluginEndpoint ChannelFilterKind = "task_plugin_endpoint"
 	FilterTaskPluginIdentity ChannelFilterKind = "task_plugin_identity"
@@ -44,6 +48,7 @@ const (
 
 type ChannelFilter struct {
 	Kind                   ChannelFilterKind
+	ExcludedChannelIDs     []int
 	RequestPath            string
 	TaskPluginKey          string
 	TaskPluginKeys         []string

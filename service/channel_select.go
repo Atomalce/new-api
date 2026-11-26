@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -153,12 +154,7 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			priorityRetry := max(groupRetry-affinityRetryOffset, 0)
 			logger.LogDebug(param.Ctx, "Auto selecting group: %s, priorityRetry: %d", autoGroup, priorityRetry)
 
-			channel, _ = model.GetRandomSatisfiedChannel(
-				autoGroup,
-				param.ModelName,
-				priorityRetry,
-				filters,
-			)
+			channel, _ = pickRetryChannel(param, autoGroup, priorityRetry, filters)
 			if channel == nil {
 				// Current group has no available channel for this model, try next group
 				// 当前分组没有该模型的可用渠道，尝试下一个分组
@@ -199,17 +195,48 @@ func CacheGetRandomSatisfiedChannel(param *RetryParam) (*model.Channel, string, 
 			break
 		}
 	} else {
-		channel, err = model.GetRandomSatisfiedChannel(
-			param.TokenGroup,
-			param.ModelName,
-			max(param.GetRetry()-affinityRetryOffset, 0),
-			filters,
-		)
+		channel, err = pickRetryChannel(param, param.TokenGroup, max(param.GetRetry()-affinityRetryOffset, 0), filters)
 		if err != nil {
 			return nil, param.TokenGroup, err
 		}
 	}
 	return channel, selectGroup, nil
+}
+
+// pickRetryChannel picks, in order of preference, a channel this request has
+// not failed on whose circuit is closed, any channel the request has not
+// failed on, and finally the priority retry pick (priorityRetry selects the
+// priority tier) that was the only rule before. A request therefore never has
+// fewer choices than without these preferences: a single channel is still
+// retried and a fully cooled-down pool is still used. Preferred picks start
+// from the highest remaining priority, so excluding failed channels does not
+// also skip a tier.
+func pickRetryChannel(param *RetryParam, group string, priorityRetry int, filters []dto.ChannelFilter) (*model.Channel, error) {
+	failed := requestFailedChannelIDs(param.Ctx)
+	preferred := append(slices.Clone(failed), channelBreaker.unavailable()...)
+	exclusions := [][]int{preferred}
+	if len(failed) > 0 && len(failed) < len(preferred) {
+		exclusions = append(exclusions, failed)
+	}
+	for _, excluded := range exclusions {
+		if len(excluded) == 0 {
+			continue
+		}
+		candidateFilters := append(slices.Clone(filters), dto.ChannelFilter{Kind: dto.FilterExcludeChannels, ExcludedChannelIDs: excluded})
+		channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, 0, candidateFilters)
+		if err != nil {
+			return nil, err
+		}
+		if channel != nil {
+			channelBreaker.claim(channel.Id)
+			return channel, nil
+		}
+	}
+	channel, err := model.GetRandomSatisfiedChannel(group, param.ModelName, priorityRetry, filters)
+	if channel != nil {
+		channelBreaker.claim(channel.Id)
+	}
+	return channel, err
 }
 
 func pinnedTaskPluginIdentities(c *gin.Context, expected string) ([]int, []string) {
@@ -337,7 +364,11 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 			if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled {
 				affinitySatisfied, _ = model.ChannelSatisfiesFilters(preferred, modelName, constraints.Filters)
 			}
-			if affinitySatisfied {
+			// A session bound to a cooling-down channel moves to a healthy one
+			// unless the binding is strict; the binding follows the channel
+			// that serves the request.
+			circuitOpen := affinitySatisfied && RequestPolicy(c).SessionMode != "strict" && !channelBreaker.allows(preferred.Id)
+			if affinitySatisfied && !circuitOpen {
 				if usingGroup == "auto" {
 					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
 					for _, g := range GetRequestAutoGroups(c, userGroup) {
@@ -357,7 +388,9 @@ func SelectChannelForRequest(c *gin.Context, modelName string, retry *RetryParam
 					MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
 				}
 			}
-			if !affinityUsable && !ShouldKeepChannelAffinityOnChannelDisabled() {
+			if affinityUsable {
+				channelBreaker.claim(preferred.Id)
+			} else if !circuitOpen && !ShouldKeepChannelAffinityOnChannelDisabled() {
 				ClearCurrentChannelAffinityCache(c)
 			}
 			if !affinityUsable && RequestPolicy(c).SessionMode == "strict" {
